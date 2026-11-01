@@ -105,7 +105,7 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
         or <strong>Run all resources</strong>.</li>
 </ol>
 <ul>
-    <li><strong>22 writable resources</strong>, with bodies taken from OpenEMR's own test fixtures.
+    <li><strong>23 writable resources</strong>, with bodies taken from OpenEMR's own test fixtures.
         Appointment is create-only.</li>
     <li><strong>7 routes answer 405</strong> (DiagnosticReport, DocumentReference, Group, Location,
         MedicationDispense, Procedure, Provenance). The suite passes them on a 405 and skips them
@@ -118,6 +118,20 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
     <li>A PUT that answers 200 with an empty body is reported as a failure.</li>
     <li>A write that answers 401 with the scope present usually means the logged-in user lacks the
         ACL shown for that resource.</li>
+    <li><strong>Task</strong> uses one of the patient's orders as its focus, never a referral: OpenEMR
+        takes a Task on a referral for the referral's own Task.</li>
+</ul>
+
+<h5>Referral loop</h5>
+<ul>
+    <li>Save a referral on a patient's Transactions screen with the <code>fhir_referral_tasks</code>
+        global on, and OpenEMR makes its Task for Refer To.</li>
+    <li><strong>Find referrals</strong>, pick one, then <strong>Accept</strong>, <strong>Reject</strong>,
+        <strong>Complete</strong> and the rest. Each PUT carries <code>If-Match</code>.</li>
+    <li>Record a Reply Date on the referral to complete its Task with the reply, then
+        <strong>Follow output</strong> to read it through DocumentReference and Binary.</li>
+    <li>These act on real referrals: Refer By gets an inbox message on accepted, rejected, completed
+        and failed.</li>
 </ul>
 
 <h5>FHIR write stress</h5>

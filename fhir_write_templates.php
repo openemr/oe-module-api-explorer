@@ -10,7 +10,8 @@
  *
  * Placeholders are filled from fhir_write.php?action=context:
  *   {{patient}} {{practitioner}} {{encounter}} {{orgProvider}} {{orgInsurer}}
- *   {{facility}} {{questionnaire}} {{unique}} {{uniqueDigits}}
+ *   {{facility}} {{questionnaire}} {{serviceRequest}} {{documentReference}}
+ *   {{unique}} {{uniqueDigits}}
  *   {{effective}}  a fresh past timestamp, generated per body (not from the context call)
  *   {{uniqueDate}} a random past date (YYYY-MM-DD), generated per body
  *
@@ -30,11 +31,12 @@
  *   variants  optional alternative bodies: name => [label, body, expect?, contains?]. expect
  *             defaults to 201 (full POST -> PUT -> verify); 400 means the POST must be refused,
  *             with `contains` somewhere in the response
- *   checks    optional follow-ups after the default round trip (see Observation)
+ *   checks    optional follow-ups after the default round trip (see Observation, and
+ *             Task's `lifecycle`: ordered PUT / search steps on the Task just created)
  *
  * Matches the write routes in apis/routes/_rest_routes_fhir_r4_us_core_3_1_0.inc.php as of
- * openemr master 69dee5d (2026-10-02), plus Observation from PR #14217 (4f6c939):
- * 22 writable resources and 7 routes that answer 405.
+ * openemr master 69dee5d (2026-10-02), plus Observation from PR #14217 (4f6c939) and Task
+ * from #14614, #14660 and #14669: 23 writable resources and 7 routes that answer 405.
  *
  * @package   OpenEMR API
  * @link      http://www.open-emr.org
@@ -405,6 +407,129 @@ return [
             'priority' => 'routine',
             'patientInstruction' => 'Fast for 8 hours before collection',
             'note' => [['text' => 'explorer-write {{unique}}']],
+        ],
+    ],
+
+    // The referral loop (openemr #14710): the referral is a ServiceRequest, and its Task says
+    // where it stands. focus -> the request, owner -> who receives it, requester -> who sent
+    // it; the reply comes back in Task.output.
+    //
+    // {{serviceRequest}} is one of the patient's orders, never a referral. Since #14715 and
+    // #14962 a Task with code fulfill, no partOf and a ServiceRequest focus is taken for a
+    // referral's own Task: on a real referral this one would become the referral's status, send
+    // Refer By an inbox message on accepted and completed, and be cancelled by the referral's
+    // next save as a Task for another owner. The Referral loop panel works the Task OpenEMR
+    // made for the referral instead.
+    //
+    // A Task that is completed, rejected, cancelled or failed can only become
+    // entered-in-error; PUT takes If-Match (W/"versionId") and answers 412 on a stale one.
+    'Task' => [
+        'scope' => 'user/Task.write',
+        'acl' => 'patients/med',
+        'verbs' => ['POST', 'PUT'],
+        'readById' => true,
+        'needs' => ['patient', 'practitioner', 'orgProvider', 'serviceRequest'],
+        'body' => [
+            'resourceType' => 'Task',
+            'status' => 'requested',
+            'intent' => 'order',
+            'priority' => 'routine',
+            'code' => ['coding' => [['system' => 'http://hl7.org/fhir/CodeSystem/task-code', 'code' => 'fulfill', 'display' => 'Fulfill the focal request']]],
+            'description' => 'explorer-write {{unique}} referral task',
+            'focus' => ['reference' => 'ServiceRequest/{{serviceRequest}}'],
+            'for' => ['reference' => 'Patient/{{patient}}'],
+            'authoredOn' => '2026-10-18T09:30:00-05:00',
+            'requester' => ['reference' => 'Practitioner/{{practitioner}}'],
+            'owner' => ['reference' => 'Organization/{{orgProvider}}'],
+            'input' => [['type' => ['text' => 'Reason for referral'], 'valueString' => 'explorer-write {{unique}}']],
+        ],
+        // The loop, one PUT at a time on the Task the round trip made. Each step's `patch` is
+        // laid over that Task's body; `ifMatch` sends the header as given; `search` is a GET on
+        // the Task type that must find the Task; `needs` skips the step (or uses `fallback`)
+        // when a context key is unresolved.
+        'checks' => [
+            'lifecycle' => [
+                ['label' => 'search by focus finds the Task', 'search' => 'focus=ServiceRequest/{{serviceRequest}}'],
+                ['label' => 'search by owner finds the Task', 'search' => 'owner=Organization/{{orgProvider}}&status=requested'],
+                ['label' => 'recipient accepts', 'patch' => ['status' => 'accepted', 'businessStatus' => ['text' => 'Accepted by recipient']], 'expect' => 200],
+                ['label' => 'recipient starts work', 'patch' => ['status' => 'in-progress', 'businessStatus' => ['text' => 'Appointment scheduled']], 'expect' => 200],
+                ['label' => 'stale If-Match is refused', 'patch' => ['status' => 'in-progress'], 'ifMatch' => 'W/"1"', 'expect' => 412],
+                [
+                    'label' => 'reply completes the Task (consult note in Task.output)',
+                    'needs' => ['documentReference'],
+                    'patch' => [
+                        'status' => 'completed',
+                        'businessStatus' => ['text' => 'Consult note received'],
+                        'output' => [[
+                            'type' => ['coding' => [['system' => 'http://loinc.org', 'code' => '11488-4', 'display' => 'Consult note']]],
+                            'valueReference' => ['reference' => 'DocumentReference/{{documentReference}}'],
+                        ]],
+                    ],
+                    // No DocumentReference for the patient: complete with the reply as text.
+                    'fallback' => [
+                        'status' => 'completed',
+                        'businessStatus' => ['text' => 'Consult note received'],
+                        'output' => [[
+                            'type' => ['coding' => [['system' => 'http://loinc.org', 'code' => '11488-4', 'display' => 'Consult note']]],
+                            'valueString' => 'explorer-write {{unique}} reply',
+                        ]],
+                    ],
+                    'expect' => 200,
+                ],
+                ['label' => 'search status=completed finds the Task', 'search' => 'focus=ServiceRequest/{{serviceRequest}}&status=completed'],
+                ['label' => 'a completed Task cannot reopen', 'patch' => ['status' => 'in-progress'], 'expect' => 400, 'contains' => "can't become"],
+            ],
+        ],
+        'variants' => [
+            'patient-questionnaire' => [
+                'label' => 'questionnaire assigned to the patient (SDC complete-questionnaire)',
+                'body' => [
+                    'resourceType' => 'Task',
+                    'status' => 'requested',
+                    'intent' => 'order',
+                    'code' => ['coding' => [['system' => 'http://hl7.org/fhir/uv/sdc/CodeSystem/temp', 'code' => 'complete-questionnaire']]],
+                    'description' => 'explorer-write {{unique}} questionnaire task',
+                    'focus' => ['reference' => 'Questionnaire/{{questionnaire}}'],
+                    'for' => ['reference' => 'Patient/{{patient}}'],
+                    'owner' => ['reference' => 'Patient/{{patient}}'],
+                    'requester' => ['reference' => 'Practitioner/{{practitioner}}'],
+                ],
+            ],
+            'focus-patient' => [
+                'label' => 'focus on a Patient is refused',
+                'expect' => 400,
+                'contains' => 'Task.focus',
+                'body' => [
+                    'resourceType' => 'Task',
+                    'status' => 'requested',
+                    'intent' => 'order',
+                    'focus' => ['reference' => 'Patient/{{patient}}'],
+                    'for' => ['reference' => 'Patient/{{patient}}'],
+                ],
+            ],
+            'bad-status' => [
+                'label' => 'status outside R4 task-status is refused',
+                'expect' => 400,
+                'contains' => 'Task.status',
+                'body' => [
+                    'resourceType' => 'Task',
+                    'status' => 'done',
+                    'intent' => 'order',
+                    'for' => ['reference' => 'Patient/{{patient}}'],
+                ],
+            ],
+            'output-practitioner' => [
+                'label' => 'output naming a Practitioner is refused',
+                'expect' => 400,
+                'contains' => 'Task.output',
+                'body' => [
+                    'resourceType' => 'Task',
+                    'status' => 'completed',
+                    'intent' => 'order',
+                    'for' => ['reference' => 'Patient/{{patient}}'],
+                    'output' => [['type' => ['text' => 'Reply'], 'valueReference' => ['reference' => 'Practitioner/{{practitioner}}']]],
+                ],
+            ],
         ],
     ],
 

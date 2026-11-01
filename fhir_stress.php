@@ -585,6 +585,7 @@ try {
                 "SELECT id, pid, title, comments FROM lists WHERE comments LIKE '%{$plan['tag']}%';",
                 "SELECT pc_eid, pc_pid, pc_hometext FROM openemr_postcalendar_events "
                     . "WHERE pc_hometext LIKE '%{$plan['tag']}%';",
+                "SELECT id, patient_id, status, description FROM task WHERE description LIKE '%{$plan['tag']}%';",
             ],
         ],
     ], JSON_UNESCAPED_SLASHES);
