@@ -1326,6 +1326,9 @@ if (
     <!-- FHIR writes — POST/PUT workbench; shares this Explorer's session token -->
     <?php include __DIR__ . '/fhir_write_card.php'; ?>
 
+    <!-- Referral loop — works a referral's own Task (openemr #14710); shares this Explorer's session token -->
+    <?php include __DIR__ . '/referral_loop_card.php'; ?>
+
     <!-- FHIR write stress — concurrent load; shares this Explorer's session token -->
     <?php include __DIR__ . '/fhir_stress_card.php'; ?>
 

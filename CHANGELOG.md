@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.0 (2026-11-01)
+
+### Added
+- **Task** in the write catalog, for the referral loop (OpenEMR #14710): a referral Task body,
+  a lifecycle check (search by focus and owner; accepted, in-progress, a stale If-Match refused
+  with 412, completed with a Consult note in `Task.output`, no reopening), a patient
+  questionnaire variant and three must-fail variants.
+- **Referral loop** panel: finds referral ServiceRequests and their Tasks, moves a referral's own
+  Task through accepted / in-progress / rejected / failed / cancelled / completed with If-Match,
+  and follows `Task.output` to the reply's DocumentReference and Binary (OpenEMR #14715, #14962).
+- `{{serviceRequest}}` (one of the patient's orders, never a referral: a Task on a referral is
+  taken for its own Task) and `{{documentReference}}` context keys; a ServiceRequest order seed.
+- **If-Match** on PUT in the FHIR writes panel, filled from the last response's ETag.
+- Scopes: `user/Task.read` / `.write`, `user/DocumentReference.read`, `user/Binary.read`,
+  `system/Task.read`, `system/Binary.read`, `patient/Task.read`. Run **Register Clients** again.
+
 ## 2.0.0 (2026-10-02)
 
 First community release.

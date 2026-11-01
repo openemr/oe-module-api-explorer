@@ -26,7 +26,7 @@ declare(strict_types=1);
 <?php explorer_panel_open('fhirWrite', 'FHIR writes', ['subtitle' => 'POST / PUT workbench']); ?>
 
         <div class="form-row align-items-end">
-            <div class="form-group col-md-4">
+            <div class="form-group col-md-3">
                 <label class="small mb-1" for="fwResource">Resource</label>
                 <select id="fwResource" class="form-control form-control-sm">
                     <option value="">— load the catalog first —</option>
@@ -39,9 +39,13 @@ declare(strict_types=1);
                     <option value="PUT">PUT</option>
                 </select>
             </div>
-            <div class="form-group col-md-4">
+            <div class="form-group col-md-3">
                 <label class="small mb-1" for="fwId">Resource id (PUT / verify)</label>
                 <input id="fwId" class="form-control form-control-sm" placeholder="filled in after a POST">
+            </div>
+            <div class="form-group col-md-2">
+                <label class="small mb-1" for="fwIfMatch" title="Sent on PUT. Task answers 412 when the version is stale; filled from the ETag of the last response.">If-Match</label>
+                <input id="fwIfMatch" class="form-control form-control-sm" placeholder='W/"1" (optional)'>
             </div>
             <div class="form-group col-md-2">
                 <button type="button" id="fwLoadBtn" class="btn btn-outline-secondary btn-sm btn-block">Load</button>
@@ -77,6 +81,7 @@ declare(strict_types=1);
     const resourceSel = document.getElementById('fwResource');
     const verbSel = document.getElementById('fwVerb');
     const idIn = document.getElementById('fwId');
+    const ifMatchIn = document.getElementById('fwIfMatch');
     const bodyIn = document.getElementById('fwBody');
     const meta = document.getElementById('fwMeta');
     const out = document.getElementById('fwOut');
@@ -281,6 +286,7 @@ declare(strict_types=1);
         sendBtn.disabled = !resource;
         roundTripBtn.disabled = !resource;
         idIn.value = '';
+        ifMatchIn.value = '';
         syncVerbs(resource);
         syncVariants(resource);
         describe(resource);
@@ -365,11 +371,11 @@ declare(strict_types=1);
         }
     }
 
-    async function send (resource, verb, id, body) {
+    async function send (resource, verb, id, body, ifMatch) {
         return api({ action: 'send' }, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ resource, verb, id, body })
+            body: JSON.stringify({ resource, verb, id, body, ifMatch: ifMatch || '' })
         });
     }
 
@@ -379,6 +385,9 @@ declare(strict_types=1);
             + (d.request ? '   ' + d.request.method + ' ' + d.request.url : ''));
         if (d.hint) {
             log('    ⚠ ' + d.hint);
+        }
+        if (d.etag) {
+            log('    ETag ' + d.etag);
         }
         if (d.body !== undefined) {
             const text = typeof d.body === 'string' ? d.body : JSON.stringify(d.body, null, 2);
@@ -393,12 +402,16 @@ declare(strict_types=1);
         const verb = verbSel.value;
         spin.style.display = 'inline';
         log(verb + ' ' + resource + '…', true);
-        const result = await send(resource, verb, idIn.value.trim(), parsed.body);
+        const result = await send(resource, verb, idIn.value.trim(), parsed.body, verb === 'PUT' ? ifMatchIn.value.trim() : '');
         spin.style.display = 'none';
         report(verb + ' ' + resource, result);
         if (result.data && result.data.id) {
             idIn.value = result.data.id;
             log('    id captured: ' + result.data.id);
+        }
+        // The next PUT then carries the version just returned, as a client working a Task would.
+        if (result.data && result.data.etag) {
+            ifMatchIn.value = result.data.etag;
         }
     });
 
@@ -437,6 +450,9 @@ declare(strict_types=1);
             results.push(judge('PUT that moves effectiveDateTime is refused',
                 await send(resource, 'PUT', created.id, moved), 400, checks.putDateChange));
         }
+        if (created && checks.lifecycle) {
+            results.push(...await runLifecycle(resource, created, checks.lifecycle));
+        }
         for (const name of Object.keys(entry.variants || {})) {
             const variant = entry.variants[name];
             const label = 'variant ' + name + ' — ' + (variant.label || '');
@@ -452,6 +468,48 @@ declare(strict_types=1);
                 why: trip.ok ? 'id ' + trip.id : (trip.skipped ? 'skipped: ' + trip.reason : 'failed at ' + trip.step + ' (HTTP ' + trip.code + ')'),
                 detail: trip.detail
             });
+        }
+        return results;
+    }
+
+    // Ordered steps on the resource the round trip made (Task: the referral loop). A PUT step
+    // lays its patch over the body as it stands after the previous step that succeeded; a
+    // search step must find the resource's id. A step whose `needs` are unresolved uses its
+    // `fallback` patch, or is skipped.
+    async function runLifecycle (resource, created, steps) {
+        const results = [];
+        let current = Object.assign({}, created.body, { id: created.id });
+        for (const step of steps) {
+            const label = 'loop: ' + step.label;
+            if (step.search) {
+                const query = fill(step.search);
+                const found = await api({ action: 'search', resource, query });
+                const ids = (found.data && found.data.ids) || [];
+                const code = found.data && found.data.code;
+                results.push({
+                    label,
+                    ok: code === 200 && ids.indexOf(created.id) !== -1,
+                    code,
+                    why: code !== 200 ? 'GET ?' + query + ' answered HTTP ' + code
+                        : (ids.indexOf(created.id) !== -1 ? ids.length + ' match(es) for ?' + query : 'GET ?' + query + ' did not return ' + created.id),
+                    detail: code !== 200 ? found.data : null
+                });
+                continue;
+            }
+            const unresolved = (step.needs || []).filter(n => !context[n]);
+            const patch = unresolved.length ? step.fallback : step.patch;
+            if (!patch) {
+                results.push({ label, ok: true, why: 'skipped: unresolved ' + unresolved.map(explainMissing).join('; ') });
+                continue;
+            }
+            const next = Object.assign({}, current, fill(patch), { id: created.id });
+            const expect = step.expect || 200;
+            const verdict = judge(label + (unresolved.length ? ' (fallback: no ' + unresolved.join(', ') + ')' : ''),
+                await send(resource, 'PUT', created.id, next, step.ifMatch || ''), expect, step.contains);
+            results.push(verdict);
+            if (verdict.ok && expect === 200) {
+                current = next;
+            }
         }
         return results;
     }

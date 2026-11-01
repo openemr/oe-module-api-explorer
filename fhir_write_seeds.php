@@ -182,4 +182,25 @@ return [
             ]],
         ],
     ],
+
+    // The write workbench's Task focus: an order, never a referral. A Task on a real referral is
+    // taken for the referral's own Task (see the Task entry in fhir_write_templates.php); the
+    // Referral loop panel works those.
+    'serviceRequest' => [
+        'resource' => 'ServiceRequest',
+        'scope' => 'user/ServiceRequest.write',
+        'label' => 'a service request for the patient',
+        'needs' => ['patient'],
+        'body' => [
+            'resourceType' => 'ServiceRequest',
+            'status' => 'active',
+            'intent' => 'order',
+            'category' => [['coding' => [['system' => 'http://snomed.info/sct', 'code' => '108252007', 'display' => 'Laboratory procedure']]]],
+            'code' => ['coding' => [['system' => 'http://loinc.org', 'code' => '24356-8', 'display' => 'Urinalysis complete panel']], 'text' => 'Urinalysis complete panel'],
+            'subject' => ['reference' => 'Patient/{{patient}}'],
+            'authoredOn' => '2024-02-01T09:30:00+00:00',
+            'priority' => 'routine',
+            'note' => [['text' => 'explorer-seed {{unique}}']],
+        ],
+    ],
 ];
