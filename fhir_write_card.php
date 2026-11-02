@@ -44,7 +44,7 @@ declare(strict_types=1);
                 <input id="fwId" class="form-control form-control-sm" placeholder="filled in after a POST">
             </div>
             <div class="form-group col-md-2">
-                <label class="small mb-1" for="fwIfMatch" title="Sent on PUT. Task answers 412 when the version is stale; filled from the ETag of the last response.">If-Match</label>
+                <label class="small mb-1" for="fwIfMatch" title="Sent on PUT. Task answers 412 when the version is stale; filled from the last response's ETag, or its meta.versionId when the ETag is stripped.">If-Match</label>
                 <input id="fwIfMatch" class="form-control form-control-sm" placeholder='W/"1" (optional)'>
             </div>
             <div class="form-group col-md-2">
@@ -410,10 +410,32 @@ declare(strict_types=1);
             log('    id captured: ' + result.data.id);
         }
         // The next PUT then carries the version just returned, as a client working a Task would.
-        if (result.data && result.data.etag) {
-            ifMatchIn.value = result.data.etag;
+        // A new resource with no version named drops the old one rather than send it to the new id.
+        const etag = responseEtag(result);
+        if (etag) {
+            ifMatchIn.value = etag;
+        } else if (verb === 'POST' && result.data && result.data.code >= 200 && result.data.code < 300) {
+            ifMatchIn.value = '';
         }
     });
+
+    // The ETag header, else W/"meta.versionId" from a 2xx body: some proxies strip ETag (the
+    // OpenEMR Docker image unsets it in docker/flex/openemr.conf).
+    function responseEtag (result) {
+        const d = (result && result.data) || {};
+        if (d.etag) {
+            return d.etag;
+        }
+        if (!(d.code >= 200 && d.code < 300)) {
+            return '';
+        }
+        let body = d.body;
+        if (typeof body === 'string') {
+            try { body = JSON.parse(body); } catch (e) { return ''; }
+        }
+        const version = body && body.meta && body.meta.versionId;
+        return version ? 'W/"' + String(version) + '"' : '';
+    }
 
     function responseText (result) {
         const d = (result && result.data) || {};

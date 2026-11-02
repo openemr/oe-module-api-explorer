@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.1 (2026-11-01)
+
+### Fixed
+- **If-Match** in the FHIR writes panel now refills from the response's `meta.versionId` when
+  there is no ETag. The OpenEMR Docker image strips ETag (`Header unset ETag`), so a second PUT
+  got 412. A POST that names no version clears the field.
+- Docs: Load picks one of the patient's orders, never a referral; a note on the core 500 for the
+  insurer Organization in Create missing fixtures.
+
 ## 2.1.0 (2026-11-01)
 
 ### Added

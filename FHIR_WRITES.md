@@ -9,14 +9,17 @@ Get a write-capable token first: **Confidential** client, **Authorization Code**
 
 1. **Load** reads the write catalog and resolves the references the bodies need from your server:
    a patient, practitioner, facility, insurer, encounter and questionnaire, plus the patient's
-   ServiceRequest (a referral first) and a DocumentReference for the Task loop.
+   orders (a ServiceRequest that isn't a referral; referrals are skipped) and a DocumentReference
+   for the Task loop. With only referrals on the patient, **Create missing fixtures** posts a lab
+   order.
 2. Pick a **Resource**. The line under it shows the scope required and whether your token has it,
    the ACL the route enforces, the verbs available, and any reference that couldn't be resolved.
 3. The **Request body** is filled from the template with real ids substituted. Edit it freely;
    **reset to template** restores it.
 4. Send it one of three ways:
    - **Send**: one POST or PUT, response shown as-is. A PUT carries **If-Match** when it is
-     filled; it is filled from the ETag of the last response (Task returns one).
+     filled; it is filled from the last response's ETag, or from `W/"meta.versionId"` in the body
+     when there is no ETag (the OpenEMR Docker image strips it with `Header unset ETag`).
    - **POST → PUT → verify**: create, update, read back.
    - **Run all resources**: the round trip for every resource, with a pass / fail / skipped list.
 
