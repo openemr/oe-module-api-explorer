@@ -634,7 +634,7 @@ try {
             } elseif ($r['code'] === 0) {
                 $hint = 'The request never reached the server -- check FHIR_SERVER_URL and TLS.';
             } elseif ($r['code'] === 412) {
-                $hint = 'If-Match named a version the resource no longer has: read it again for its ETag.';
+                $hint = 'If-Match named a version the resource no longer has: read it again for its ETag or meta.versionId.';
             }
 
             echo json_encode([

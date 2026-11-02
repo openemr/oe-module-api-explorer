@@ -190,6 +190,7 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
     <tr><td>JWT client can't get a token</td><td>Enable system scopes in Admin → Config → Connectors.</td></tr>
     <tr><td>Redirect returns to the wrong host</td><td>Check OpenEMR's Site Address, or set <code>app_url</code> in <code>config.local.php</code>.</td></tr>
     <tr><td>Writes skipped for unresolved context</td><td>Create missing fixtures.</td></tr>
+    <tr><td>Create missing fixtures: 500 on the insurer Organization</td><td>An OpenEMR core bug in <code>FhirOrganizationInsuranceService::parseFhirResource</code>, not the Explorer. Add an insurance company in OpenEMR instead.</td></tr>
     <tr><td>Scope Lab: invalid CSRF token</td><td>Reload this page.</td></tr>
     </tbody>
 </table>
