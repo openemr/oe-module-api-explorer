@@ -48,7 +48,7 @@ You need a running OpenEMR development install (8.0 or current master; PHP 8.2+)
 ```bash
 cd /path/to/openemr
 mkdir -p devtools
-git clone https://github.com/sjpadgett/oe-module-api-explorer.git devtools/oe-module-api-explorer
+git clone https://github.com/openemr/oe-module-api-explorer.git devtools/oe-module-api-explorer
 ```
 
 **2. Turn the APIs on in OpenEMR** (Admin → Config → Connectors)
@@ -182,7 +182,7 @@ No Composer install and no build step: it uses the libraries OpenEMR already shi
 ## Contributing and support
 
 Issues and pull requests are welcome at
-<https://github.com/sjpadgett/oe-module-api-explorer>. See [CONTRIBUTING.md](CONTRIBUTING.md).
+<https://github.com/openemr/oe-module-api-explorer>. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 This is a community project and not an official OpenEMR product.
 
