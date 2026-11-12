@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.2.0 (2026-11-12)
+
+### Added
+- **Patient app writes** panel (OpenEMR #14999, #15162): QuestionnaireResponse written with the
+  Public client's patient token and held for staff review. Run checks covers the hold, read and
+  search, revise, withdraw, 410 afterwards, and the refusals (another patient, an unknown
+  Questionnaire, an id mismatch), and leaves one write for staff to approve or deny.
+- **EHI rows**: SQL for the rows an EHI export of the patient must carry, `patient_review_request`
+  and `patient_review_event` (OpenEMR #15104), `questionnaire_response` and the Task tables.
+- Scopes: `patient/Questionnaire.rs`, `patient/QuestionnaireResponse.rs` / `.cu` for the Public
+  client; `user/DiagnosticReport.read` (OpenEMR #14972), `user/Provenance.read`, `user/Group.read`,
+  `user/ValueSet.read`, `user/OperationDefinition.read`, and v2-only `user/Media.rs`,
+  `user/MedicationDispense.rs`, `user/Specimen.rs`; system reads for Questionnaire,
+  QuestionnaireResponse, RelatedPerson, ValueSet, OperationDefinition, Media and
+  MedicationDispense. Run **Register Clients** again.
+
+### Changed
+- The Request panel lists a Public client's `.rs` resources, not only `.read`.
+- `fhirCall()` moved to `fhir_http.php`, shared by the write and patient write endpoints, and
+  sends no Authorization header without a token.
+- The insurer Organization 500 in Create missing fixtures is fixed in OpenEMR #15012.
+
 ## 2.1.1 (2026-11-01)
 
 ### Fixed

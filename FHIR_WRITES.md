@@ -165,6 +165,49 @@ Add an entry to `fhir_write_templates.php`:
 Add `user/Example.read` and `user/Example.write` to `FHIR_READ_SCOPES` and `FHIR_WRITE_SCOPES` in
 `config.php`, run Register Clients, and get a new token.
 
+## Patient app writes panel
+
+Writes QuestionnaireResponse the way a patient's SMART app would (openemr #14999, #15162).
+OpenEMR holds each write for staff review and keeps it out of the chart until it is approved.
+
+1. In OpenEMR, set **Admin → Config → Connectors → Patient App FHIR Writes** to
+   *Confidential and public apps* and turn on **QuestionnaireResponse**. Only then does the server
+   publish `patient/QuestionnaireResponse.cu`, and Register Clients drops a scope the server
+   doesn't publish, so set this first.
+2. **Register Clients**, **Clear Session**, then Fetch with the **Public** client and log in as a
+   patient. In *Confidential apps* mode the server drops `.cu` from a public client's token, so
+   every write gets 403. That is the check for that mode.
+3. **Check token** shows the client, the token's patient, whether the token can write and whether
+   the server advertises `.cu`, and lists the Questionnaires the token can read. If none are
+   readable, enter a Questionnaire id. The body is built from its first item the app can answer.
+4. **Run checks**:
+
+| Step | Expected |
+|---|---|
+| POST the response | 201, `Location`, tagged `held-for-review` |
+| GET it by id | 200, the held resource |
+| Search `patient=` | Finds it, held |
+| PUT a revised answer | 200, still held |
+| PUT with another id in the body | 400 |
+| POST naming another patient | 403 |
+| POST for a Questionnaire this server doesn't have | 400 |
+| PUT `status` `entered-in-error` | 200; the request is cancelled |
+| GET, then PUT, after the withdrawal | 410 |
+| POST one more | 201, left for staff |
+
+5. Approve or deny the last one in **Miscellaneous → Patient App Submissions**, then **Read** it:
+   approved answers the chart record under the same id with no tag, and denied answers 410.
+
+### EHI export
+
+**EHI rows** prints SQL for the rows an EHI export of the token's patient must carry:
+`patient_review_request` and `patient_review_event` (exported since openemr #15104),
+`questionnaire_response`, and `task`, `task_input`, `task_output` from the Referral loop. Run it,
+export the same patient in **Modules → EHI Exporter**, and find the same rows in the zip. The
+exporter follows `Documentation/EHI_Export/docs/openemr.openemr.xml`, so a row missing from the zip
+is a gap in that schema file, not in `b10-tables.yml`. `patient_review_secret` is left out on
+purpose.
+
 ## FHIR write stress panel
 
 Sends many writes at once to find what single requests can't: id allocator collisions,
