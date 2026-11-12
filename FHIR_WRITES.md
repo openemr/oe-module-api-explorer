@@ -229,6 +229,7 @@ first with items) and checks:
 | PUT with a body id that isn't the URL's | 400 |
 | PUT on an id the app didn't write | 403 |
 | POST for another patient | 403 |
+| POST for a Questionnaire this server doesn't have | 400 |
 | POST a vital-sign Observation, an AllergyIntolerance, a Condition | 401/403 (if one is ever accepted, the probe is withdrawn and the run says the server is newer) |
 | PUT `entered-in-error` (withdraw), then GET, then PUT | 200, 410, 410 |
 
@@ -241,6 +242,16 @@ questionnaire a patient app records home readings with (`patient_write_seeds.php
 `http://open-emr.org/fhir/Questionnaire/home-vital-signs`). Each item carries the LOINC code and
 UCUM unit of its vital sign, so the same answers can become vital-sign Observations once OpenEMR
 takes those from patient apps. The OpenEMR SMART Questionnaires app ships the same definition.
+
+### EHI export
+
+**EHI rows** prints SQL for the rows an EHI export of the token's patient must carry:
+`patient_review_request` and `patient_review_event` (exported since OpenEMR #15104),
+`questionnaire_response`, and `task`, `task_input`, `task_output` from the Referral loop. Run it,
+export the same patient in **Modules → EHI Exporter**, and find the same rows in the zip. The
+exporter follows `Documentation/EHI_Export/docs/openemr.openemr.xml`, so a row missing from the zip
+is a gap in that schema file, not in `b10-tables.yml`. `patient_review_secret` is left out on
+purpose.
 
 ## FHIR write stress panel
 

@@ -55,6 +55,8 @@ declare(strict_types=1);
             <button type="button" id="pwRunBtn" class="btn btn-primary btn-sm">Run patient write checks</button>
             <button type="button" id="pwSeedBtn" class="btn btn-outline-secondary btn-sm"
                     title="POST the Home vital signs Questionnaire with the session's staff token (user/Questionnaire.write, admin/super)">Seed Home vital signs Questionnaire</button>
+            <button type="button" id="pwEhiBtn" class="btn btn-outline-dark btn-sm"
+                    title="SQL for the rows an EHI export of this patient must carry">EHI rows</button>
             <span id="pwSpinner" class="ml-2 small text-muted" style="display:none;">working…</span>
         </div>
 
@@ -108,6 +110,14 @@ declare(strict_types=1);
             log('  ✗ HTTP ' + d.code + ' ' + (d.why || ''));
             if (d.hint) log('  ' + d.hint);
         }
+    });
+
+    document.getElementById('pwEhiBtn').addEventListener('click', async () => {
+        const d = await api({ action: 'ehi' });
+        if (d.error) { log('  ✗ ' + d.error, true); return; }
+        log('Rows an EHI export of patient ' + d.patient + ' must carry (tables: ' + d.tables.join(', ') + ').', true);
+        log('Run this SQL, then export the patient in Modules → EHI Exporter and find the same rows in the zip:\n');
+        log(d.sql);
     });
 
     document.getElementById('pwRunBtn').addEventListener('click', async () => {

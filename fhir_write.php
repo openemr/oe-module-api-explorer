@@ -49,6 +49,7 @@ header('Content-Type: application/json');
 
 require_once 'config.php';
 require_once __DIR__ . '/src/ScopeAlgebra.php';
+require_once __DIR__ . '/fhir_http.php';
 
 use OpenEMR\ApiExplorer\ScopeLab\ScopeAlgebra;
 
@@ -70,46 +71,6 @@ if ($access === '') {
 
 $fhirBase = rtrim((string) $GLOBALS['ApiConfig']['FHIR_SERVER_URL'], '/');
 $action = (string) ($_GET['action'] ?? 'catalog');
-
-/**
- * @param array<int, string> $headers
- * @return array{code:int, body:string, location:string, etag:string}
- */
-function fhirCall(string $method, string $url, string $access, array $headers = [], ?string $payload = null): array
-{
-    $ch = curl_init($url);
-    $location = '';
-    $etag = '';
-    $opts = [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CUSTOMREQUEST => $method,
-        CURLOPT_HTTPHEADER => array_merge(["Authorization: Bearer {$access}"], $headers),
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_HEADERFUNCTION => function ($ch, $header) use (&$location, &$etag) {
-            if (stripos($header, 'Location:') === 0) {
-                $location = trim(substr($header, strlen('Location:')));
-            } elseif (stripos($header, 'ETag:') === 0) {
-                $etag = trim(substr($header, strlen('ETag:')));
-            }
-            return strlen($header);
-        },
-    ];
-    if ($payload !== null) {
-        $opts[CURLOPT_POSTFIELDS] = $payload;
-    }
-    curl_setopt_array($ch, $opts);
-    $body = curl_exec($ch);
-    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    if ($code === 0 && $curlError !== '') {
-        return ['code' => 0, 'body' => json_encode(['transport_error' => $curlError]) ?: '', 'location' => '', 'etag' => ''];
-    }
-
-    return ['code' => $code, 'body' => is_string($body) ? $body : '', 'location' => $location, 'etag' => $etag];
-}
 
 /**
  * First entry id out of a search bundle, optionally the first entry matching $pick.

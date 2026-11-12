@@ -56,7 +56,7 @@ if (($_GET['grant_type'] ?? '') === 'client_credentials') {
 }
 
 // Public
-preg_match_all('/patient\/([A-Za-z]+)\.read/', PUBLIC_SCOPES, $matchesPublic);
+preg_match_all('/patient\/([A-Za-z]+)\.(?:read|rs)\b/', PUBLIC_SCOPES, $matchesPublic);
 $public = array_unique($matchesPublic[1]);
 
 echo json_encode([

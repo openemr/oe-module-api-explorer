@@ -21,6 +21,9 @@
  *   seedVitals  create the "Home vital signs" Questionnaire (needs a staff token with
  *               user/Questionnaire.write); reports the existing one if it is already there
  *   run         ?questionnaire=<id>&keep=1  the held-write lifecycle and the must-refuse checks
+ *   ehi         SQL listing the rows an EHI export of the token's patient must carry: the review
+ *               requests and their history (openemr #15104), questionnaire responses and Tasks.
+ *               Nothing here opens the database; run the SQL yourself.
  *
  * @package   OpenEMR API
  * @link      http://www.open-emr.org
@@ -398,6 +401,9 @@ try {
             $other = call('POST', "{$fhirBase}/QuestionnaireResponse", $access, ['subject' => ['reference' => 'Patient/' . $strangerId]] + $qr);
             $step('POST for another patient', $other['code'] === 403, 'HTTP ' . $other['code'] . ' ' . why($other) . ' (expect 403)');
 
+            $unknown = call('POST', "{$fhirBase}/QuestionnaireResponse", $access, ['questionnaire' => 'Questionnaire/' . $strangerId] + $qr);
+            $step('POST for a Questionnaire this server does not have', $unknown['code'] === 400, 'HTTP ' . $unknown['code'] . ' ' . why($unknown) . ' (expect 400)');
+
             // Types that have a setting but are not served to patient apps yet.
             $notServed = [
                 'Observation (vital-signs)' => ['Observation', [
@@ -460,6 +466,33 @@ try {
             }
 
             echo json_encode(['steps' => $steps, 'questionnaire' => $questionnaire['id'], 'id' => $id]);
+            break;
+
+        case 'ehi':
+            $patient = trim((string) ($_GET['patient'] ?? $patientId));
+            if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $patient) !== 1) {
+                http_response_code(400);
+                echo json_encode(['error' => 'A patient uuid is required (the token names none, or it is not a uuid).']);
+                exit;
+            }
+            // The tables Documentation/EHI_Export/b10-tables.yml lists for this work. The EHI
+            // exporter walks its schema files, so a row here that is missing from an export is a
+            // gap in docs/openemr.openemr.xml (openemr #15104 fixed it for the review tables).
+            $hex = str_replace('-', '', strtolower($patient));
+            echo json_encode([
+                'patient' => $patient,
+                'tables' => ['patient_review_request', 'patient_review_event', 'questionnaire_response', 'task', 'task_input', 'task_output'],
+                'sql' => implode("\n", [
+                    "SET @pid = (SELECT pid FROM patient_data WHERE uuid = UNHEX('{$hex}'));",
+                    "SELECT @pid AS pid;",
+                    "SELECT id, HEX(uuid) AS uuid, type, source, client_id, status, target_table, target_id FROM patient_review_request WHERE pid = @pid ORDER BY id;",
+                    "SELECT e.* FROM patient_review_event e JOIN patient_review_request r ON r.id = e.request_id WHERE r.pid = @pid ORDER BY e.id;",
+                    "SELECT id, HEX(uuid) AS uuid, questionnaire_id, status FROM questionnaire_response WHERE patient_id = @pid ORDER BY id;",
+                    "SELECT id, HEX(uuid) AS uuid, status, description FROM task WHERE patient_id = @pid ORDER BY id;",
+                    "SELECT 'task_input' AS t, COUNT(*) AS n FROM task_input i JOIN task t ON t.id = i.task_id WHERE t.patient_id = @pid",
+                    "UNION ALL SELECT 'task_output', COUNT(*) FROM task_output o JOIN task t ON t.id = o.task_id WHERE t.patient_id = @pid;",
+                ]),
+            ]);
             break;
 
         default:

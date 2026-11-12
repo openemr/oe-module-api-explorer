@@ -1,13 +1,16 @@
 # Changelog
 
-## 2.2.0 (2026-11-11)
+## 2.2.0 (2026-11-12)
 
 ### Added
 - **Patient app writes** panel (OpenEMR #15138, #15144, #15162): with a patient token, a
   QuestionnaireResponse held for staff review is created, read back, found by search, revised,
   withdrawn (then 410), and checked against the must-refuse cases (body id mismatch, an id the app
-  didn't write, another patient, and vital-sign Observation / AllergyIntolerance / Condition, which
-  have settings but are not served to patient apps yet). Can leave the write for staff review.
+  didn't write, another patient, a Questionnaire the server doesn't have, and vital-sign
+  Observation / AllergyIntolerance / Condition, which have settings but are not served to patient
+  apps yet). Can leave the write for staff review.
+- **EHI rows**: SQL for the rows an EHI export of the patient must carry, `patient_review_request`
+  and `patient_review_event` (OpenEMR #15104), `questionnaire_response` and the Task tables.
 - **Seed Home vital signs Questionnaire**: a LOINC/UCUM-coded questionnaire for a patient's home
   readings, shared with the OpenEMR SMART Questionnaires app.
 - **Check Clients** in the session bar: asks the site (RFC 7592 read) whether each saved client is
@@ -19,6 +22,17 @@
 - Observation variants: height in cm, a heart rate above the plausibility limit, the vital signs
   panel 85353-1, and a lab result under category `laboratory` (refused: lab results are written
   through their procedure order).
+- Scopes: `patient/Questionnaire.rs`, `patient/QuestionnaireResponse.rs` / `.cu` for the Public and
+  Confidential clients; `user/DiagnosticReport.read` (OpenEMR #14972), `user/Provenance.read`,
+  `user/Group.read`, `user/ValueSet.read`, `user/OperationDefinition.read`, and v2-only
+  `user/Media.rs`, `user/MedicationDispense.rs`, `user/Specimen.rs`; system reads for Questionnaire,
+  QuestionnaireResponse, RelatedPerson, ValueSet, OperationDefinition, Media and
+  MedicationDispense. Run **Register Clients** again.
+
+### Changed
+- The Request panel lists a Public client's `.rs` resources, not only `.read`.
+- `fhirCall()` moved to `fhir_http.php` and sends no Authorization header without a token.
+- The insurer Organization 500 in Create missing fixtures is fixed in OpenEMR #15012.
 
 ### Fixed
 - Referral loop picked the referral's Task by bundle order. After a Re-send that could be the old
@@ -27,11 +41,11 @@
 - Docs: a rejected or failed Task now closes its referral (only completed completes it); Re-send,
   recipient notices and Direct replies are on the referral page and have no API.
 - Patient app writes: a Patient Login token without `launch/patient` has no `patient` in the
-  token response, so the panel refused to run. The patient now comes from the id_token's
-  `fhirUser`, else from a Patient search (a patient token reads only its own record).
+  token response. The patient now comes from the id_token's `fhirUser`, else from a Patient
+  search (a patient token reads only its own record).
 - Home vital signs seed: OpenEMR ignores a client `url` on create and publishes its own, so the
   questionnaire also carries its canonical as an `identifier` (`urn:ietf:rfc:3986`), and the
-  panel recognizes it by title plus url or identifier. Found by a live run against OpenEMR.
+  panel recognizes it by title plus url or identifier.
 
 ## 2.1.1 (2026-11-01)
 
