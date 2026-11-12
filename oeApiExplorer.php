@@ -1329,6 +1329,9 @@ if (
     <!-- Referral loop — works a referral's own Task (openemr #14710); shares this Explorer's session token -->
     <?php include __DIR__ . '/referral_loop_card.php'; ?>
 
+    <!-- Patient app writes — QuestionnaireResponse held for staff review (openemr #15162); shares this Explorer's session token -->
+    <?php include __DIR__ . '/patient_app_write_card.php'; ?>
+
     <!-- FHIR write stress — concurrent load; shares this Explorer's session token -->
     <?php include __DIR__ . '/fhir_stress_card.php'; ?>
 

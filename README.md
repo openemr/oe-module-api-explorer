@@ -23,6 +23,7 @@ Dedicated to the OpenEMR community. *Jerry Padgett*
 | **Bulk $export** | Lists Groups, starts a Group `$export`, polls it, and lists the NDJSON files. |
 | **FHIR writes** | POST / PUT workbench for 23 writable resources, with a full POST → PUT → verify round trip. |
 | **Referral loop** | Works a referral's own Task: accept, reject, complete with If-Match, then follow the reply to its DocumentReference and Binary. |
+| **Patient app writes** | Writes QuestionnaireResponse with a patient token: held for staff review, revised, withdrawn and refused as OpenEMR's hold contract says, then the SQL for the rows an EHI export must carry. |
 | **FHIR write stress** | Fires many writes at once and reports latency, status spread and duplicate ids. |
 | **Scope Lab** | Tests SMART v1, v2 and mixed scope sets across grant types: what was granted, and what is enforced. |
 | **SMART launch workspace** | Appears when OpenEMR launches the Explorer as a SMART app: launch context, patient, questionnaires. |
@@ -31,8 +32,8 @@ Clients and grants covered:
 
 | Client | Grant | Typical use |
 |---|---|---|
-| Confidential | Authorization Code (+ refresh) | Provider-facing apps. Carries the write scopes. |
-| Public | Authorization Code with PKCE | Patient-facing and browser apps. |
+| Confidential | Authorization Code (+ refresh) | Provider-facing apps. Carries the user/ write scopes. |
+| Public | Authorization Code with PKCE | Patient-facing and browser apps. Patient QuestionnaireResponse writes, held for review. |
 | JWT | Client Credentials (signed assertion) | Backend services, bulk export. |
 | SMART EHR Launch | Authorization Code with `launch` | Apps launched from inside OpenEMR. |
 

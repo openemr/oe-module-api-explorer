@@ -68,8 +68,8 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
 <table class="table table-sm table-bordered bg-light">
     <thead><tr><th>Client</th><th>Grant</th><th>Scopes (config.php)</th><th>Use it for</th></tr></thead>
     <tbody>
-    <tr><td>Confidential</td><td>Authorization Code + refresh</td><td><code>LIMITED_SCOPES</code></td><td>Provider-facing apps; the only client with write scopes</td></tr>
-    <tr><td>Public</td><td>Authorization Code with PKCE</td><td><code>PUBLIC_SCOPES</code></td><td>Patient-facing and browser apps</td></tr>
+    <tr><td>Confidential</td><td>Authorization Code + refresh</td><td><code>LIMITED_SCOPES</code></td><td>Provider-facing apps; the only client with user/ write scopes</td></tr>
+    <tr><td>Public</td><td>Authorization Code with PKCE</td><td><code>PUBLIC_SCOPES</code></td><td>Patient-facing and browser apps; patient QuestionnaireResponse writes, held for staff review</td></tr>
     <tr><td>JWT</td><td>Client Credentials</td><td><code>SYSTEM_SCOPES</code></td><td>Backend services, bulk export</td></tr>
     <tr><td>SMART EHR Launch</td><td>Authorization Code with <code>launch</code></td><td><code>SMART_SCOPES</code></td><td>Apps launched from inside OpenEMR</td></tr>
     </tbody>
@@ -77,6 +77,8 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
 <ul>
     <li>Register Clients reads the scopes the server publishes and leaves out any it doesn't offer,
         listing them in its output. One checkout therefore works across OpenEMR versions.</li>
+    <li>Resources OpenEMR publishes only in SMART v2 form (Procedure, Media, MedicationDispense,
+        Specimen) are asked for as <code>.rs</code> in <code>FHIR_V2_READ_SCOPES</code>.</li>
     <li>Scopes are fixed when a client is registered. After editing a scope constant, run
         <strong>Register Clients</strong> again and get a new token.</li>
     <li>On servers without the consent fix (OpenEMR PR #14317), asking for a v2 read and a v1 write
@@ -134,6 +136,19 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
         and failed.</li>
 </ul>
 
+<h5>Patient app writes</h5>
+<ol>
+    <li>In OpenEMR, set <strong>Admin → Config → Connectors → Patient App FHIR Writes</strong> to
+        <em>Confidential and public apps</em> and turn on <strong>QuestionnaireResponse</strong>.</li>
+    <li><strong>Register Clients</strong>, <strong>Clear Session</strong>, then Fetch with the
+        <strong>Public</strong> client as a patient.</li>
+    <li><strong>Check token</strong>, pick a Questionnaire, <strong>Run checks</strong>. One write is
+        left for staff: approve or deny it under <strong>Miscellaneous → Patient App Submissions</strong>,
+        then <strong>Read</strong> it.</li>
+    <li><strong>EHI rows</strong> prints SQL for the review, questionnaire and Task rows an EHI export
+        of the patient must carry. Export the patient in the EHI Exporter and compare.</li>
+</ol>
+
 <h5>FHIR write stress</h5>
 <p>
     Sends many writes at once and reports latency, status spread and whether every create returned
@@ -190,7 +205,8 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
     <tr><td>JWT client can't get a token</td><td>Enable system scopes in Admin → Config → Connectors.</td></tr>
     <tr><td>Redirect returns to the wrong host</td><td>Check OpenEMR's Site Address, or set <code>app_url</code> in <code>config.local.php</code>.</td></tr>
     <tr><td>Writes skipped for unresolved context</td><td>Create missing fixtures.</td></tr>
-    <tr><td>Create missing fixtures: 500 on the insurer Organization</td><td>An OpenEMR core bug in <code>FhirOrganizationInsuranceService::parseFhirResource</code>, not the Explorer. Add an insurance company in OpenEMR instead.</td></tr>
+    <tr><td>Create missing fixtures: 500 on the insurer Organization</td><td>An OpenEMR core bug, fixed in openemr #15012. Update OpenEMR, or add an insurance company in OpenEMR instead.</td></tr>
+    <tr><td>Patient app writes: 403 on every write</td><td>The token has no <code>patient/QuestionnaireResponse.cu</code>: open the setting, Register Clients, Clear Session, fetch again. In <em>Confidential apps</em> mode the Public client never gets it.</td></tr>
     <tr><td>Scope Lab: invalid CSRF token</td><td>Reload this page.</td></tr>
     </tbody>
 </table>
