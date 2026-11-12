@@ -134,20 +134,26 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
         <strong>Follow output</strong> to read it through DocumentReference and Binary.</li>
     <li>These act on real referrals: Refer By gets an inbox message on accepted, rejected, completed
         and failed.</li>
+    <li>After a Re-send (on the referral page) the referral has a newer Task for the same recipient; the
+        panel works the latest one that still counts and lists the older ones as <em>earlier</em>.</li>
+    <li><strong>Probe locks</strong> tries to change a referral Task's owner, code, focus and partOf with a
+        stale <code>If-Match</code>: 400 means locked, 412 means not locked, and nothing is written.</li>
+    <li><strong>What does this token reach?</strong> recognizes a client limited to an address book entry
+        (it reads its Tasks and referrals; everything else is 403).</li>
 </ul>
 
 <h5>Patient app writes</h5>
-<ol>
-    <li>In OpenEMR, set <strong>Admin → Config → Connectors → Patient App FHIR Writes</strong> to
-        <em>Confidential and public apps</em> and turn on <strong>QuestionnaireResponse</strong>.</li>
-    <li><strong>Register Clients</strong>, <strong>Clear Session</strong>, then Fetch with the
-        <strong>Public</strong> client as a patient.</li>
-    <li><strong>Check token</strong>, pick a Questionnaire, <strong>Run checks</strong>. One write is
-        left for staff: approve or deny it under <strong>Miscellaneous → Patient App Submissions</strong>,
-        then <strong>Read</strong> it.</li>
+<ul>
+    <li>Needs a patient token: the Public client, Authorization Code, <strong>Patient Login</strong> on
+        OpenEMR's sign-in page, and Patient App FHIR Writes on (Admin → Config → Connectors).</li>
+    <li><strong>Run patient write checks</strong> sends a QuestionnaireResponse that is held for staff
+        review, reads it back, revises it, withdraws it (then 410), and checks that vital-sign
+        Observation, AllergyIntolerance and Condition are still refused.</li>
+    <li><strong>Seed Home vital signs Questionnaire</strong> (with a staff token) adds the questionnaire a
+        patient app records home readings with.</li>
     <li><strong>EHI rows</strong> prints SQL for the review, questionnaire and Task rows an EHI export
         of the patient must carry. Export the patient in the EHI Exporter and compare.</li>
-</ol>
+</ul>
 
 <h5>FHIR write stress</h5>
 <p>
@@ -181,6 +187,12 @@ $helpLocalConfig = is_file(__DIR__ . '/config.local.php');
     dashboard, or <strong>Patient → Assessments → FHIR Assessments</strong>. The Explorer then
     shows the discovery document, the launch context from the token response, and the
     questionnaire workspace. If it reports an unknown issuer, add that OpenEMR URL to your sites.
+</p>
+<p>
+    A questionnaire card offers <strong>Launch App</strong> only when the Explorer's SMART client is
+    registered and enabled <em>and</em> a SMART availability rule in the Questionnaire Manager reaches
+    that questionnaire. If the Explorer is missing from the menu, press <strong>Check Clients</strong>:
+    a rebuilt database loses the Explorer's clients, and its authorize request then answers 400.
 </p>
 
 <h5>Current endpoints</h5>

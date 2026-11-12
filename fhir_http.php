@@ -3,8 +3,8 @@
 /**
  * fhir_http.php — the one FHIR HTTP call the Explorer's AJAX endpoints share.
  *
- * Used by fhir_write.php and patient_app_write.php. The bearer token is attached here, server
- * side, so it never reaches the browser.
+ * Used by fhir_write.php. The bearer token is attached here, server side, so it never reaches
+ * the browser.
  *
  * @package   OpenEMR API
  * @link      http://www.open-emr.org

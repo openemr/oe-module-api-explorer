@@ -784,6 +784,67 @@ return [
                     'effectiveDateTime' => '{{effective}}',
                 ],
             ],
+            'height-cm' => [
+                'label' => 'Body height in cm (converted to in)',
+                'body' => [
+                    'resourceType' => 'Observation',
+                    'status' => 'final',
+                    'category' => [['coding' => [['system' => 'http://terminology.hl7.org/CodeSystem/observation-category', 'code' => 'vital-signs', 'display' => 'Vital Signs']]]],
+                    'code' => ['coding' => [['system' => 'http://loinc.org', 'code' => '8302-2', 'display' => 'Body height']], 'text' => 'Body height'],
+                    'subject' => ['reference' => 'Patient/{{patient}}'],
+                    'encounter' => ['reference' => 'Encounter/{{encounter}}'],
+                    'valueQuantity' => ['value' => 170, 'unit' => 'cm', 'system' => 'http://unitsofmeasure.org', 'code' => 'cm'],
+                    'effectiveDateTime' => '{{effective}}',
+                ],
+            ],
+            // VITALS_WRITE_COLUMNS caps each column at a plausibility limit (pulse 500 /min), so a
+            // mistyped value is refused instead of being cut down to what the column holds.
+            'implausible-pulse' => [
+                'label' => 'Heart rate above the largest value accepted',
+                'expect' => 400,
+                'contains' => 'largest value accepted',
+                'body' => [
+                    'resourceType' => 'Observation',
+                    'status' => 'final',
+                    'category' => [['coding' => [['system' => 'http://terminology.hl7.org/CodeSystem/observation-category', 'code' => 'vital-signs', 'display' => 'Vital Signs']]]],
+                    'code' => ['coding' => [['system' => 'http://loinc.org', 'code' => '8867-4', 'display' => 'Heart rate']], 'text' => 'Heart rate'],
+                    'subject' => ['reference' => 'Patient/{{patient}}'],
+                    'encounter' => ['reference' => 'Encounter/{{encounter}}'],
+                    'valueQuantity' => ['value' => 900, 'unit' => '/min', 'system' => 'http://unitsofmeasure.org', 'code' => '/min'],
+                    'effectiveDateTime' => '{{effective}}',
+                ],
+            ],
+            'vitals-panel' => [
+                'label' => 'Vital signs panel 85353-1 (assembled on read, not writable)',
+                'expect' => 400,
+                'contains' => 'cannot be written',
+                'body' => [
+                    'resourceType' => 'Observation',
+                    'status' => 'final',
+                    'category' => [['coding' => [['system' => 'http://terminology.hl7.org/CodeSystem/observation-category', 'code' => 'vital-signs', 'display' => 'Vital Signs']]]],
+                    'code' => ['coding' => [['system' => 'http://loinc.org', 'code' => '85353-1', 'display' => 'Vital signs, weight, height, head circumference, oxygen saturation and BMI panel']]],
+                    'subject' => ['reference' => 'Patient/{{patient}}'],
+                    'encounter' => ['reference' => 'Encounter/{{encounter}}'],
+                    'effectiveDateTime' => '{{effective}}',
+                ],
+            ],
+            // Category routes the write. A laboratory result goes through its procedure order, so
+            // the API refuses it; the same code under vital-signs (2708-6) would be a vital sign.
+            'laboratory' => [
+                'label' => 'Lab result (laboratory category, not writable through Observation)',
+                'expect' => 400,
+                'contains' => 'laboratory',
+                'body' => [
+                    'resourceType' => 'Observation',
+                    'status' => 'final',
+                    'category' => [['coding' => [['system' => 'http://terminology.hl7.org/CodeSystem/observation-category', 'code' => 'laboratory', 'display' => 'Laboratory']]]],
+                    'code' => ['coding' => [['system' => 'http://loinc.org', 'code' => '2345-7', 'display' => 'Glucose [Mass/volume] in Serum or Plasma']]],
+                    'subject' => ['reference' => 'Patient/{{patient}}'],
+                    'encounter' => ['reference' => 'Encounter/{{encounter}}'],
+                    'valueQuantity' => ['value' => 95, 'unit' => 'mg/dL', 'system' => 'http://unitsofmeasure.org', 'code' => 'mg/dL'],
+                    'effectiveDateTime' => '{{effective}}',
+                ],
+            ],
         ],
     ],
 

@@ -196,22 +196,24 @@ const FHIR_WRITE_SCOPES = 'user/AllergyIntolerance.write user/Appointment.write 
 // These are the `api:oemr` endpoints under /apis/default/api, not the FHIR ones above.
 const STANDARD_API_WRITE_SCOPES = 'user/allergy.write user/appointment.write user/dental_issue.write user/document.write user/encounter.write user/facility.write user/insurance.write user/insurance_company.write user/medical_problem.write user/medication.write user/message.write user/patient.write user/practitioner.write user/prescription.write user/soap_note.write user/surgery.write user/transaction.write user/vital.write';
 
-// Note: there is no patient/ form of any write scope. ServerScopeListEntity now also emits
-// `system/<Resource>.write` when system scopes are enabled, but SYSTEM_SCOPES does not ask for
-// them -- use the Confidential Auth-Code client for writes, or the Scope Lab to test system writes.
+// ServerScopeListEntity also emits `system/<Resource>.write` when system scopes are enabled, but
+// SYSTEM_SCOPES does not ask for them -- use the Confidential Auth-Code client for writes, or the
+// Scope Lab to test system writes.
 
 // Readable resources OpenEMR publishes only in the SMART v2 form. None is writable through
 // the API, so the v1/v2 consent caveat above doesn't apply.
 const FHIR_V2_READ_SCOPES = 'user/Procedure.rs user/Media.rs user/MedicationDispense.rs user/Specimen.rs';
-
-const LIMITED_SCOPES = 'openid offline_access api:oemr api:fhir api:port patient/encounter.read patient/patient.read patient/Patient.read patient/Encounter.read ' . FHIR_READ_SCOPES . ' ' . FHIR_V2_READ_SCOPES . ' ' . FHIR_WRITE_SCOPES . ' ' . STANDARD_API_WRITE_SCOPES;
 
 // Patient app writes (openemr #14999, #15162): OpenEMR offers patient/QuestionnaireResponse.cu only
 // while Admin > Config > Connectors opens QuestionnaireResponse to patient apps, and drops it at
 // token issuance for a public client unless the mode is "Confidential and public apps". Register
 // Clients leaves out an unpublished scope, so open the setting first, then register. Every write
 // is held for staff review (Miscellaneous > Patient App Submissions). The read is the v2 .rs to
-// sit on one version with .cu; Questionnaire.rs lets the app find what to answer.
+// sit on one version with .cu; Questionnaire.rs lets the app find what to answer. Vital signs,
+// AllergyIntolerance and Condition have settings but no scope yet. The Confidential client asks
+// for them too, so a patient signing in through it tests the "Confidential apps" mode.
 const PATIENT_APP_WRITE_SCOPES = 'patient/Questionnaire.rs patient/QuestionnaireResponse.rs patient/QuestionnaireResponse.cu';
+
+const LIMITED_SCOPES = 'openid offline_access api:oemr api:fhir api:port patient/encounter.read patient/patient.read patient/Patient.read patient/Encounter.read ' . FHIR_READ_SCOPES . ' ' . FHIR_V2_READ_SCOPES . ' ' . FHIR_WRITE_SCOPES . ' ' . STANDARD_API_WRITE_SCOPES . ' ' . PATIENT_APP_WRITE_SCOPES;
 
 const PUBLIC_SCOPES = 'openid offline_access api:oemr api:fhir api:port patient/encounter.read patient/patient.read patient/Patient.read patient/Encounter.read patient/AllergyIntolerance.read patient/CareTeam.read patient/MedicationRequest.read patient/Task.read ' . PATIENT_APP_WRITE_SCOPES;
