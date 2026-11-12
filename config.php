@@ -151,7 +151,7 @@ $GLOBALS['ApiConfig']['SMART_REDIRECT_URI'] = "{$app_path}/oeApiExplorer.php";
 // reads them -- if it ever needs to write one, move that resource to .read + .write too.
 const SMART_SCOPES = 'openid fhirUser launch user/Patient.rs user/Encounter.rs user/Appointment.read user/Questionnaire.rs user/QuestionnaireResponse.read user/QuestionnaireResponse.write';
 
-const SYSTEM_SCOPES = 'openid offline_access api:oemr api:fhir api:port system/Patient.rs system/AllergyIntolerance.rs user/AllergyIntolerance.rs system/CarePlan.read system/CareTeam.rs system/Condition.read system/Coverage.read system/Device.read system/DiagnosticReport.read system/DocumentReference.read system/Encounter.read system/Goal.read system/Group.read system/Immunization.read system/Location.read system/Medication.read system/MedicationRequest.read system/Observation.read system/Organization.read system/Person.read system/Practitioner.read system/PractitionerRole.read system/Procedure.read system/Provenance.read system/*.$export system/Patient.$export system/ServiceRequest.rs system/Specimen.rs user/Specimen.rs system/ServiceRequest.r system/ServiceRequest.read system/Task.read system/Binary.read system/Questionnaire.read system/QuestionnaireResponse.read system/RelatedPerson.read system/ValueSet.read system/OperationDefinition.read system/Media.rs system/MedicationDispense.rs system/Group.$export system/*.$bulkdata-status';
+const SYSTEM_SCOPES = 'openid offline_access api:oemr api:fhir api:port system/Patient.rs system/AllergyIntolerance.rs user/AllergyIntolerance.rs system/CarePlan.read system/CareTeam.rs system/Condition.read system/Coverage.read system/Device.read system/DiagnosticReport.read system/DocumentReference.read system/Encounter.read system/Goal.read system/Group.read system/Immunization.read system/Location.read system/Medication.read system/MedicationRequest.read system/Observation.read system/Organization.read system/Person.read system/Practitioner.read system/PractitionerRole.read system/Procedure.read system/Provenance.read system/*.$export system/Patient.$export system/ServiceRequest.rs system/Specimen.rs user/Specimen.rs system/ServiceRequest.r system/ServiceRequest.read system/Task.read system/Binary.read system/Group.$export system/*.$bulkdata-status';
 
 // Read scopes for every resource the write workbench touches -- the POST/PUT half is
 // useless without them, since verifying a write means reading it back, and resolving
@@ -168,15 +168,12 @@ const SYSTEM_SCOPES = 'openid offline_access api:oemr api:fhir api:port system/P
 // Task, DocumentReference and Binary are here for the referral loop (openemr #14710): a
 // referral is a ServiceRequest, its Task says where it stands, and the reply comes back as a
 // DocumentReference in Task.output whose content is read through Binary.
-// DiagnosticReport (readable by clinical users since openemr #14972), Provenance, Group, ValueSet
-// and OperationDefinition are read-only here: OpenEMR publishes a v1 read for each and no write
-// the Explorer uses, so there is no read/write pair to keep on one version.
 // Observation writes arrive with OpenEMR PR #14217. 'observation_write' in config.local.php
 // turns the scope request off; it is on by default because Register Clients drops any scope
 // the server does not publish, so an older server simply registers without it.
 define('EXPLORER_OBSERVATION_WRITE', !empty($explorerSettings['observation_write']));
 
-const FHIR_READ_SCOPES = 'user/AllergyIntolerance.read user/Appointment.read user/CarePlan.read user/CareTeam.read user/Condition.read user/Coverage.read user/Device.read user/Encounter.read user/Goal.read user/Immunization.read user/Location.read user/Medication.read user/MedicationRequest.read user/Observation.read user/Organization.read user/Patient.read user/Person.read user/Practitioner.read user/PractitionerRole.read user/Questionnaire.read user/QuestionnaireResponse.read user/RelatedPerson.read user/ServiceRequest.read user/Task.read user/DocumentReference.read user/Binary.read user/DiagnosticReport.read user/Provenance.read user/Group.read user/ValueSet.read user/OperationDefinition.read';
+const FHIR_READ_SCOPES = 'user/AllergyIntolerance.read user/Appointment.read user/CarePlan.read user/CareTeam.read user/Condition.read user/Coverage.read user/Device.read user/Encounter.read user/Goal.read user/Immunization.read user/Location.read user/Medication.read user/MedicationRequest.read user/Observation.read user/Organization.read user/Patient.read user/Person.read user/Practitioner.read user/PractitionerRole.read user/Questionnaire.read user/QuestionnaireResponse.read user/RelatedPerson.read user/ServiceRequest.read user/Task.read user/DocumentReference.read user/Binary.read';
 
 // FHIR write scopes for the resources the OpenEMR FHIR API accepts POST/PUT on.
 // The generic write controller rejects patient-scope tokens outright, so these are all
@@ -196,22 +193,17 @@ const FHIR_WRITE_SCOPES = 'user/AllergyIntolerance.write user/Appointment.write 
 // These are the `api:oemr` endpoints under /apis/default/api, not the FHIR ones above.
 const STANDARD_API_WRITE_SCOPES = 'user/allergy.write user/appointment.write user/dental_issue.write user/document.write user/encounter.write user/facility.write user/insurance.write user/insurance_company.write user/medical_problem.write user/medication.write user/message.write user/patient.write user/practitioner.write user/prescription.write user/soap_note.write user/surgery.write user/transaction.write user/vital.write';
 
-// Note: there is no patient/ form of any write scope. ServerScopeListEntity now also emits
-// `system/<Resource>.write` when system scopes are enabled, but SYSTEM_SCOPES does not ask for
-// them -- use the Confidential Auth-Code client for writes, or the Scope Lab to test system writes.
+// ServerScopeListEntity also emits `system/<Resource>.write` when system scopes are enabled, but
+// SYSTEM_SCOPES does not ask for them -- use the Confidential Auth-Code client for writes, or the
+// Scope Lab to test system writes.
 
-// Readable resources OpenEMR publishes only in the SMART v2 form. None is writable through
-// the API, so the v1/v2 consent caveat above doesn't apply.
-const FHIR_V2_READ_SCOPES = 'user/Procedure.rs user/Media.rs user/MedicationDispense.rs user/Specimen.rs';
+// A patient app's writes, held for staff review (openemr #15138, #15144, #15162). OpenEMR
+// publishes a patient write scope only for a type it serves to patient apps -- today just
+// QuestionnaireResponse -- and only while the site's Patient App FHIR Writes mode is on and the
+// type is enabled; Register Clients drops it otherwise. Vital signs, AllergyIntolerance and
+// Condition have settings but no scope yet. Sign in as a portal patient to get a patient token.
+const PATIENT_WRITE_SCOPES = 'patient/Questionnaire.rs patient/QuestionnaireResponse.rs patient/QuestionnaireResponse.cu';
 
-const LIMITED_SCOPES = 'openid offline_access api:oemr api:fhir api:port patient/encounter.read patient/patient.read patient/Patient.read patient/Encounter.read ' . FHIR_READ_SCOPES . ' ' . FHIR_V2_READ_SCOPES . ' ' . FHIR_WRITE_SCOPES . ' ' . STANDARD_API_WRITE_SCOPES;
+const LIMITED_SCOPES = 'openid offline_access api:oemr api:fhir api:port user/Procedure.rs patient/encounter.read patient/patient.read patient/Patient.read patient/Encounter.read ' . FHIR_READ_SCOPES . ' ' . FHIR_WRITE_SCOPES . ' ' . STANDARD_API_WRITE_SCOPES . ' ' . PATIENT_WRITE_SCOPES;
 
-// Patient app writes (openemr #14999, #15162): OpenEMR offers patient/QuestionnaireResponse.cu only
-// while Admin > Config > Connectors opens QuestionnaireResponse to patient apps, and drops it at
-// token issuance for a public client unless the mode is "Confidential and public apps". Register
-// Clients leaves out an unpublished scope, so open the setting first, then register. Every write
-// is held for staff review (Miscellaneous > Patient App Submissions). The read is the v2 .rs to
-// sit on one version with .cu; Questionnaire.rs lets the app find what to answer.
-const PATIENT_APP_WRITE_SCOPES = 'patient/Questionnaire.rs patient/QuestionnaireResponse.rs patient/QuestionnaireResponse.cu';
-
-const PUBLIC_SCOPES = 'openid offline_access api:oemr api:fhir api:port patient/encounter.read patient/patient.read patient/Patient.read patient/Encounter.read patient/AllergyIntolerance.read patient/CareTeam.read patient/MedicationRequest.read patient/Task.read ' . PATIENT_APP_WRITE_SCOPES;
+const PUBLIC_SCOPES = 'openid offline_access api:oemr api:fhir api:port patient/encounter.read patient/patient.read patient/Patient.read patient/Encounter.read patient/AllergyIntolerance.read patient/CareTeam.read patient/MedicationRequest.read patient/Task.read' . ' ' . PATIENT_WRITE_SCOPES;

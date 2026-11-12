@@ -13,8 +13,13 @@
  * failed send Refer By an inbox message (when the fhir_referral_tasks global is on). A Task in
  * a final status can only become entered-in-error.
  *
- * All traffic goes through fhir_write.php (actions referrals, verify, send, output), which holds
- * the session's bearer token.
+ * Since openemr #15139 / #15140 / #15203: a referral's Task can't change owner, code or focus or
+ * gain a partOf (400); Re-send on the referral page makes a newer Task for the same recipient, so
+ * the referral's Task is the latest one that still counts, not the first in the bundle; a client
+ * can be limited to one address book entry; and the recipient can be told by Direct or email.
+ *
+ * All traffic goes through fhir_write.php (actions referrals, verify, send, output, referralLocks,
+ * clientReach), which holds the session's bearer token.
  *
  * @package   OpenEMR API
  * @link      http://www.open-emr.org
@@ -37,6 +42,13 @@ declare(strict_types=1);
             Needs <code>user/ServiceRequest.read</code>, <code>user/Task.read</code> / <code>.write</code>,
             <code>user/DocumentReference.read</code> and <code>user/Binary.read</code>.
         </p>
+        <p class="small text-muted mb-2">
+            After the recipient rejects, fails or cancels, <b>Re-send</b> on the referral page makes a new
+            <code>requested</code> Task and keeps the old one as the record; the table lists the older ones as
+            <i>earlier</i>. With <code>fhir_referral_notify_recipient</code> on, the recipient is told on create and on
+            Re-send (Direct C-CDA, else a plain email, else nothing), and the referral page shows how. A Direct reply is
+            confirmed on the referral page too. Neither has an API.
+        </p>
 
         <div class="form-row align-items-end">
             <div class="form-group col-md-4">
@@ -56,7 +68,7 @@ declare(strict_types=1);
             <table class="table table-sm table-hover small mb-2">
                 <thead>
                 <tr>
-                    <th></th><th>Referral</th><th>Patient</th><th>Refer By → Refer To</th><th>Task</th><th>Status</th><th>Outputs</th>
+                    <th></th><th>Referral</th><th>Patient</th><th>Refer By → Refer To</th><th>Task</th><th>Status</th><th>Outputs</th><th>Earlier / other Tasks</th>
                 </tr>
                 </thead>
                 <tbody id="rlRows"></tbody>
@@ -92,6 +104,12 @@ declare(strict_types=1);
             <button type="button" id="rlReadBtn" class="btn btn-outline-primary btn-sm">Read Task</button>
             <button type="button" id="rlOutputBtn" class="btn btn-outline-primary btn-sm">Follow output</button>
             <span id="rlSpinner" class="ml-2 small text-muted" style="display:none;">working…</span>
+        </div>
+        <div class="mb-2">
+            <button type="button" id="rlLocksBtn" class="btn btn-outline-info btn-sm"
+                    title="Try to change owner, code, focus and partOf with a stale If-Match: 400 means locked, 412 means not locked, and nothing is written either way">Probe locks</button>
+            <button type="button" id="rlReachBtn" class="btn btn-outline-info btn-sm"
+                    title="What this token can read. A client limited to an address book entry reads its Tasks and referrals and gets 403 everywhere else">What does this token reach?</button>
         </div>
 
         <pre id="rlOut" class="explorer-log mt-2 mb-0" style="display:none;"></pre>
@@ -152,10 +170,13 @@ declare(strict_types=1);
             tr.appendChild(cell(r.id + (r.code ? ' — ' + r.code : '')));
             tr.appendChild(cell(r.patient));
             tr.appendChild(cell((r.requester || '?') + ' → ' + (r.performer || '?')));
-            const others = r.tasks.length - (own ? 1 : 0);
-            tr.appendChild(cell(own ? own.id + ' (v' + own.version + ')' + (others ? ' +' + others + ' other' : '') : (r.tasks.length ? r.tasks.length + ' other Task(s), none for Refer To' : 'none')));
+            tr.appendChild(cell(own ? own.id + ' (v' + own.version + ')' : (r.tasks.length ? 'none that counts for Refer To' : 'none')));
             tr.appendChild(cell(own ? own.status + (own.statusReason ? ': ' + own.statusReason : (own.businessStatus ? ' — ' + own.businessStatus : '')) : ''));
             tr.appendChild(cell(own ? own.outputs : ''));
+            // Earlier own Tasks (a Re-send keeps them as the record), ones OpenEMR set aside, and
+            // sub-Tasks or Tasks an API client made with this referral as focus.
+            tr.appendChild(cell(r.tasks.filter(t => t.id !== r.ownTask).map(t => String(t.id).slice(0, 8) + '… ' + t.status
+                + (t.own ? (t.setAside ? ' (set aside by OpenEMR)' : ' (earlier)') : ' (' + (t.partOf ? 'sub-Task' : (t.code || 'other')) + ')')).join('; ')));
             rows.appendChild(tr);
         });
         tableWrap.style.display = referrals.length ? 'block' : 'none';
@@ -183,6 +204,12 @@ declare(strict_types=1);
         render(d.referrals);
         const withTask = d.referrals.filter(r => r.ownTask).length;
         log('  ' + d.referrals.length + ' referral(s), ' + withTask + ' with a Task for Refer To.');
+        d.referrals.forEach(r => {
+            const counting = r.tasks.filter(t => t.own && !t.setAside).length;
+            if (counting > 1) {
+                log('  ↻ ' + r.id + ' was re-sent: ' + counting + ' Tasks for Refer To; the latest (' + r.ownTask + ') stands for the referral.');
+            }
+        });
         d.referrals.filter(r => r.taskSearchCode !== 200).forEach(r => {
             log('  ⚠ Task search for ' + r.id + ' answered HTTP ' + r.taskSearchCode + (r.taskSearchCode === 401 || r.taskSearchCode === 403 ? ' — no user/Task.read scope' : ''));
         });
@@ -297,6 +324,42 @@ declare(strict_types=1);
                 }
             }
         });
+    });
+
+    document.getElementById('rlLocksBtn').addEventListener('click', async () => {
+        const id = taskIn.value.trim();
+        if (!id) { log('Pick a referral or enter a Task id.', true); return; }
+        spin.style.display = 'inline';
+        log('Probing the elements locked on Task/' + id + ' (each PUT carries a stale If-Match, so nothing is written)…', true);
+        const result = await api({ action: 'referralLocks', task: id });
+        spin.style.display = 'none';
+        const d = result.data || {};
+        if (!d.probes) {
+            log('  ✗ HTTP ' + d.code + ' reading the Task: ' + JSON.stringify(d.body || d).slice(0, 600));
+            return;
+        }
+        const mark = { locked: '✓', 'not-locked': '✗', inconclusive: '?', skipped: '–' };
+        d.probes.forEach(p => {
+            log('  ' + (mark[p.outcome] || '?') + ' ' + p.element.padEnd(7) + (p.code ? ' HTTP ' + p.code + '  ' : '  ') + p.detail);
+            if (p.outcome === 'inconclusive') {
+                log('      ' + JSON.stringify(p.body).slice(0, 400));
+            }
+        });
+        log(d.unchanged ? '  Task still at v' + d.task.version + ': nothing was written.' : '  ⚠ The Task version changed during the probe; read it again.');
+    });
+
+    document.getElementById('rlReachBtn').addEventListener('click', async () => {
+        spin.style.display = 'inline';
+        log('Checking what this token can read…', true);
+        const result = await api({ action: 'clientReach' });
+        spin.style.display = 'none';
+        const d = result.data || {};
+        (d.rows || []).forEach(r => {
+            log('  ' + r.label.padEnd(26) + ' HTTP ' + r.code + (r.entries !== null ? '  ' + r.entries + ' entr' + (r.entries === 1 ? 'y' : 'ies') : ''));
+        });
+        log(d.looksLimited
+            ? '  Looks like a client limited to an address book entry: it reads its own Tasks and the referrals it currently receives, and nothing else. A PUT can\'t hand a Task to anyone else.'
+            : '  Not limited to an address book entry. An administrator sets that on the client\'s page (Admin > System > API Clients > Limit to Address Book Entry); dynamic registration can\'t.');
     });
 })();
 </script>

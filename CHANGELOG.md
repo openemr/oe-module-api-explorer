@@ -1,26 +1,37 @@
 # Changelog
 
-## 2.2.0 (2026-11-12)
+## 2.2.0 (2026-11-11)
 
 ### Added
-- **Patient app writes** panel (OpenEMR #14999, #15162): QuestionnaireResponse written with the
-  Public client's patient token and held for staff review. Run checks covers the hold, read and
-  search, revise, withdraw, 410 afterwards, and the refusals (another patient, an unknown
-  Questionnaire, an id mismatch), and leaves one write for staff to approve or deny.
-- **EHI rows**: SQL for the rows an EHI export of the patient must carry, `patient_review_request`
-  and `patient_review_event` (OpenEMR #15104), `questionnaire_response` and the Task tables.
-- Scopes: `patient/Questionnaire.rs`, `patient/QuestionnaireResponse.rs` / `.cu` for the Public
-  client; `user/DiagnosticReport.read` (OpenEMR #14972), `user/Provenance.read`, `user/Group.read`,
-  `user/ValueSet.read`, `user/OperationDefinition.read`, and v2-only `user/Media.rs`,
-  `user/MedicationDispense.rs`, `user/Specimen.rs`; system reads for Questionnaire,
-  QuestionnaireResponse, RelatedPerson, ValueSet, OperationDefinition, Media and
-  MedicationDispense. Run **Register Clients** again.
+- **Patient app writes** panel (OpenEMR #15138, #15144, #15162): with a patient token, a
+  QuestionnaireResponse held for staff review is created, read back, found by search, revised,
+  withdrawn (then 410), and checked against the must-refuse cases (body id mismatch, an id the app
+  didn't write, another patient, and vital-sign Observation / AllergyIntolerance / Condition, which
+  have settings but are not served to patient apps yet). Can leave the write for staff review.
+- **Seed Home vital signs Questionnaire**: a LOINC/UCUM-coded questionnaire for a patient's home
+  readings, shared with the OpenEMR SMART Questionnaires app.
+- **Check Clients** in the session bar: asks the site (RFC 7592 read) whether each saved client is
+  still registered and enabled, and keeps the rotated registration token. A rebuilt database that
+  lost the Explorer's clients is why an EHR launch stops offering the Explorer.
+- Referral loop: **Probe locks** (owner, code, focus, partOf on a referral's Task, OpenEMR #15139)
+  with a stale If-Match so nothing is written; **What does this token reach?** for clients limited
+  to an address book entry (#15140); an *Earlier / other Tasks* column.
+- Observation variants: height in cm, a heart rate above the plausibility limit, the vital signs
+  panel 85353-1, and a lab result under category `laboratory` (refused: lab results are written
+  through their procedure order).
 
-### Changed
-- The Request panel lists a Public client's `.rs` resources, not only `.read`.
-- `fhirCall()` moved to `fhir_http.php`, shared by the write and patient write endpoints, and
-  sends no Authorization header without a token.
-- The insurer Organization 500 in Create missing fixtures is fixed in OpenEMR #15012.
+### Fixed
+- Referral loop picked the referral's Task by bundle order. After a Re-send that could be the old
+  rejected Task. It now takes the latest own Task that still counts for the recipient, as
+  OpenEMR does, and ignores Tasks OpenEMR set aside itself.
+- Docs: a rejected or failed Task now closes its referral (only completed completes it); Re-send,
+  recipient notices and Direct replies are on the referral page and have no API.
+- Patient app writes: a Patient Login token without `launch/patient` has no `patient` in the
+  token response, so the panel refused to run. The patient now comes from the id_token's
+  `fhirUser`, else from a Patient search (a patient token reads only its own record).
+- Home vital signs seed: OpenEMR ignores a client `url` on create and publishes its own, so the
+  questionnaire also carries its canonical as an `identifier` (`urn:ietf:rfc:3986`), and the
+  panel recognizes it by title plus url or identifier. Found by a live run against OpenEMR.
 
 ## 2.1.1 (2026-11-01)
 

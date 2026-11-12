@@ -69,6 +69,13 @@ With Observation selected, a dropdown next to *reset to template* offers more bo
 | No encounter, no category | 400 |
 | Smoking status (social-history), BMI | 400, read-only |
 | Zero value, unit that can't be converted | 400 |
+| Body height in cm | 201, converted to in |
+| Heart rate 900 /min | 400, "above the largest value accepted" (each column has a plausibility limit) |
+| Vital signs panel 85353-1 | 400, assembled from its members on read |
+| Glucose under category `laboratory` | 400: lab results are written through their procedure order |
+
+Category is half of the route: the same code can be a vital sign under `vital-signs` and a lab
+result under `laboratory`, so a write without a category is refused.
 
 Running the round trip with the default body also runs every variant and two follow-up checks:
 a repeat POST of the same reading and a PUT that moves the date must both be refused.
@@ -113,8 +120,11 @@ Works the Task OpenEMR makes for a referral, the way the recipient's system woul
    Date. With the `fhir_referral_tasks` global on, saving it makes its Task: `requested`,
    owned by Refer To, requested by Refer By.
 2. **Find referrals** lists the referral ServiceRequests (category `3457005`) and every Task that
-   names each as focus. The referral's own Task is the one with code `fulfill`, no `partOf`,
-   owned by the referral's performer; other Tasks are counted beside it.
+   names each as focus. The referral's own Task is the latest one with code `fulfill`, no
+   `partOf`, owned by the referral's performer, that still counts for the recipient (OpenEMR's
+   `ReferralTaskService::recipientTask()`): one OpenEMR set aside itself (cancelled because the
+   referral went elsewhere, lost its recipient or was deleted; entered-in-error because its reply
+   was cleared) doesn't. After a **Re-send** the older Tasks are listed as *earlier*.
 3. Pick one, then **Accept**, **In progress**, **On hold**, **Reject**, **Fail**, **Cancel**,
    **Complete** or **Entered in error**. Each reads the Task and PUTs it back with the new status
    and `If-Match` set to its version. The reason field becomes `statusReason` for rejected,
@@ -125,11 +135,34 @@ Works the Task OpenEMR makes for a referral, the way the recipient's system woul
 5. **Follow output** reads `Task.output` -> DocumentReference -> its attachment's Binary and shows
    the reply text. The Binary is only fetched from this FHIR server.
 
+6. **Probe locks** (OpenEMR #15139) tries to change the Task's `owner` (to its requester), `code`,
+   `focus` (to another of the patient's ServiceRequests) and to set `partOf` (to another of the
+   patient's Tasks). Every PUT carries an `If-Match` one version ahead. OpenEMR validates the body
+   before it compares versions, so a server with the lock answers 400 naming the element, and one
+   without it answers 412: nothing is written either way. An element is skipped when the patient
+   has nothing valid to point it at, since an unresolvable reference would be refused first and
+   hide the lock.
+7. **What does this token reach?** (OpenEMR #15140) reads Task, referral and all ServiceRequests,
+   Patient, Practitioner and Organization. A client an administrator limited to an address book
+   entry (Admin > System > API Clients > *Limit to Address Book Entry*) reads only the Tasks that
+   entry owns and the referrals it currently receives, and gets 403 everywhere else. Dynamic
+   registration can't set the limit.
+
 These change real referrals. The referral screen and worklist show the Task's status, and
 accepted, rejected, completed and failed each send Refer By a "Referral" message in their
-inbox. A completed, rejected, failed or cancelled Task can only become entered-in-error. At the
-time of writing a rejected or failed Task doesn't close its referral; only cancelled and
-entered-in-error do.
+inbox. A completed, rejected, failed or cancelled Task can only become entered-in-error. A
+completed Task (or a Reply Date) completes the referral; any other final status closes it.
+
+What has no API, and is done on the referral page (OpenEMR #15139, #15203):
+
+- **Re-send**, offered when the recipient's latest Task is rejected, failed or cancelled by them
+  and the referral has no Reply Date. It makes a new `requested` Task and keeps the old one.
+- **Notify Referral Recipients** (`fhir_referral_notify_recipient`, off by default): the recipient
+  is told when a Task is made for them and on a Re-send, by Direct (the Referral C-CDA) when the
+  address book entry has a Direct address, else by a plain email with no patient details. The
+  referral page shows how they were told; each notice is in the `referral_notice` table.
+- A **Direct reply** to a message sent about the referral is filed with it, and **Confirm it
+  completes the referral** completes the Task with the reply's documents as Consult note outputs.
 
 ### Placeholders
 
@@ -167,46 +200,47 @@ Add `user/Example.read` and `user/Example.write` to `FHIR_READ_SCOPES` and `FHIR
 
 ## Patient app writes panel
 
-Writes QuestionnaireResponse the way a patient's SMART app would (openemr #14999, #15162).
-OpenEMR holds each write for staff review and keeps it out of the chart until it is approved.
+What a patient-facing app can write (OpenEMR #15138, #15144, #15162). With **Patient App FHIR
+Writes** on (Admin > Config > Connectors), a patient token's QuestionnaireResponse is **held for
+staff review** in *Miscellaneous > Patient App Submissions* and stays out of the chart until
+approved. The mode decides which clients may write: *Confidential apps*, or *Confidential and
+public apps*.
 
-1. In OpenEMR, set **Admin → Config → Connectors → Patient App FHIR Writes** to
-   *Confidential and public apps* and turn on **QuestionnaireResponse**. Only then does the server
-   publish `patient/QuestionnaireResponse.cu`, and Register Clients drops a scope the server
-   doesn't publish, so set this first.
-2. **Register Clients**, **Clear Session**, then Fetch with the **Public** client and log in as a
-   patient. In *Confidential apps* mode the server drops `.cu` from a public client's token, so
-   every write gets 403. That is the check for that mode.
-3. **Check token** shows the client, the token's patient, whether the token can write and whether
-   the server advertises `.cu`, and lists the Questionnaires the token can read. If none are
-   readable, enter a Questionnaire id. The body is built from its first item the app can answer.
-4. **Run checks**:
+Only QuestionnaireResponse is served to patient apps today. Vital signs, AllergyIntolerance and
+Condition have settings, but their help says "Not accepted yet in this version": the server
+publishes no patient write scope for them, and a POST is refused whatever the setting.
 
-| Step | Expected |
+Get a patient token: the **Public** client, Authorization Code, and **Patient Login** on OpenEMR's
+sign-in page (the mode must allow public apps). **Token & server** shows what the token holds and
+which patient write scopes the server publishes. A Patient Login token has no `patient` in the
+token response unless `launch/patient` was asked for; the panel then takes the patient from the
+id_token's `fhirUser` or from a Patient search, and says which.
+
+**Run patient write checks** answers a Questionnaire (Home vital signs if it is seeded, else the
+first with items) and checks:
+
+| Step | Expect |
 |---|---|
-| POST the response | 201, `Location`, tagged `held-for-review` |
-| GET it by id | 200, the held resource |
-| Search `patient=` | Finds it, held |
-| PUT a revised answer | 200, still held |
-| PUT with another id in the body | 400 |
-| POST naming another patient | 403 |
-| POST for a Questionnaire this server doesn't have | 400 |
-| PUT `status` `entered-in-error` | 200; the request is cancelled |
-| GET, then PUT, after the withdrawal | 410 |
-| POST one more | 201, left for staff |
+| POST QuestionnaireResponse | 201, `meta.tag` `held-for-review`, a Location |
+| GET by id | 200, still tagged |
+| Search `?patient=` | the held write is in the bundle |
+| Search `?patient=&_sort=-authored` | information: held writes join only a search by `_id`, `patient`, `subject` and `_count`, so an app sorts on its side |
+| PUT a revision | 200, still held |
+| PUT with a body id that isn't the URL's | 400 |
+| PUT on an id the app didn't write | 403 |
+| POST for another patient | 403 |
+| POST a vital-sign Observation, an AllergyIntolerance, a Condition | 401/403 (if one is ever accepted, the probe is withdrawn and the run says the server is newer) |
+| PUT `entered-in-error` (withdraw), then GET, then PUT | 200, 410, 410 |
 
-5. Approve or deny the last one in **Miscellaneous → Patient App Submissions**, then **Read** it:
-   approved answers the chart record under the same id with no tag, and denied answers 410.
+Tick **leave it for staff review** to skip the withdrawal and approve or deny it in Patient App
+Submissions. Approved, it keeps its id and reads as an ordinary QuestionnaireResponse; denied, it
+reads 410.
 
-### EHI export
-
-**EHI rows** prints SQL for the rows an EHI export of the token's patient must carry:
-`patient_review_request` and `patient_review_event` (exported since openemr #15104),
-`questionnaire_response`, and `task`, `task_input`, `task_output` from the Referral loop. Run it,
-export the same patient in **Modules → EHI Exporter**, and find the same rows in the zip. The
-exporter follows `Documentation/EHI_Export/docs/openemr.openemr.xml`, so a row missing from the zip
-is a gap in that schema file, not in `b10-tables.yml`. `patient_review_secret` is left out on
-purpose.
+**Seed Home vital signs Questionnaire** (staff token with `user/Questionnaire.write`) adds the
+questionnaire a patient app records home readings with (`patient_write_seeds.php`; canonical
+`http://open-emr.org/fhir/Questionnaire/home-vital-signs`). Each item carries the LOINC code and
+UCUM unit of its vital sign, so the same answers can become vital-sign Observations once OpenEMR
+takes those from patient apps. The OpenEMR SMART Questionnaires app ships the same definition.
 
 ## FHIR write stress panel
 

@@ -23,7 +23,6 @@ Dedicated to the OpenEMR community. *Jerry Padgett*
 | **Bulk $export** | Lists Groups, starts a Group `$export`, polls it, and lists the NDJSON files. |
 | **FHIR writes** | POST / PUT workbench for 23 writable resources, with a full POST → PUT → verify round trip. |
 | **Referral loop** | Works a referral's own Task: accept, reject, complete with If-Match, then follow the reply to its DocumentReference and Binary. |
-| **Patient app writes** | Writes QuestionnaireResponse with a patient token: held for staff review, revised, withdrawn and refused as OpenEMR's hold contract says, then the SQL for the rows an EHI export must carry. |
 | **FHIR write stress** | Fires many writes at once and reports latency, status spread and duplicate ids. |
 | **Scope Lab** | Tests SMART v1, v2 and mixed scope sets across grant types: what was granted, and what is enforced. |
 | **SMART launch workspace** | Appears when OpenEMR launches the Explorer as a SMART app: launch context, patient, questionnaires. |
@@ -32,8 +31,8 @@ Clients and grants covered:
 
 | Client | Grant | Typical use |
 |---|---|---|
-| Confidential | Authorization Code (+ refresh) | Provider-facing apps. Carries the user/ write scopes. |
-| Public | Authorization Code with PKCE | Patient-facing and browser apps. Patient QuestionnaireResponse writes, held for review. |
+| Confidential | Authorization Code (+ refresh) | Provider-facing apps. Carries the write scopes. |
+| Public | Authorization Code with PKCE | Patient-facing and browser apps. |
 | JWT | Client Credentials (signed assertion) | Backend services, bulk export. |
 | SMART EHR Launch | Authorization Code with `launch` | Apps launched from inside OpenEMR. |
 
@@ -48,7 +47,7 @@ You need a running OpenEMR development install (8.0 or current master; PHP 8.2+)
 ```bash
 cd /path/to/openemr
 mkdir -p devtools
-git clone https://github.com/openemr/oe-module-api-explorer.git devtools/oe-module-api-explorer
+git clone https://github.com/sjpadgett/oe-module-api-explorer.git devtools/oe-module-api-explorer
 ```
 
 **2. Turn the APIs on in OpenEMR** (Admin → Config → Connectors)
@@ -182,7 +181,7 @@ No Composer install and no build step: it uses the libraries OpenEMR already shi
 ## Contributing and support
 
 Issues and pull requests are welcome at
-<https://github.com/openemr/oe-module-api-explorer>. See [CONTRIBUTING.md](CONTRIBUTING.md).
+<https://github.com/sjpadgett/oe-module-api-explorer>. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 This is a community project and not an official OpenEMR product.
 

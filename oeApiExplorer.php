@@ -1150,9 +1150,49 @@ if (
             <div class="ml-auto btn-group btn-group-sm">
                 <a href="client_register.php?regen=1&amp;api_site=<?= attr($_SESSION['selectedSite']) ?>"
                    class="btn btn-outline-success">Register Clients</a>
+                <button type="button" id="checkClientsBtn" class="btn btn-outline-secondary"
+                        title="Ask the site whether each saved client is still registered and enabled">Check Clients</button>
                 <button type="submit" name="cleanSession" value="1" class="btn btn-outline-danger">Clear Session</button>
             </div>
         </form>
+        <div id="checkClientsOut" class="small mb-2" style="display:none;"></div>
+        <script>
+        (function () {
+            const btn = document.getElementById('checkClientsBtn');
+            const out = document.getElementById('checkClientsOut');
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                out.style.display = 'block';
+                out.className = 'small mb-2 alert alert-secondary';
+                out.textContent = 'Checking the saved clients against the site…';
+                try {
+                    const res = await fetch('client_check.php', { credentials: 'same-origin' });
+                    const d = await res.json();
+                    const rows = d.clients || [];
+                    const bad = rows.filter(r => r.state !== 'ok');
+                    out.className = 'small mb-2 alert ' + (rows.length && !bad.length ? 'alert-success' : 'alert-warning');
+                    out.replaceChildren();
+                    const head = document.createElement('div');
+                    head.textContent = d.hint || (bad.length
+                        ? bad.length + ' of ' + rows.length + ' saved clients for ' + d.site + ' are not usable. An EHR launch only offers the SMART client once it is registered and enabled.'
+                        : 'All ' + rows.length + ' saved clients for ' + d.site + ' are registered and enabled.');
+                    out.appendChild(head);
+                    const ul = document.createElement('ul');
+                    ul.className = 'mb-0';
+                    rows.forEach(r => {
+                        const li = document.createElement('li');
+                        li.textContent = (r.state === 'ok' ? '✓ ' : '✗ ') + r.role + ' (' + (r.clientId || '?').slice(0, 12) + '…): ' + r.detail;
+                        ul.appendChild(li);
+                    });
+                    out.appendChild(ul);
+                } catch (e) {
+                    out.className = 'small mb-2 alert alert-danger';
+                    out.textContent = 'Check failed: ' + e;
+                }
+                btn.disabled = false;
+            });
+        })();
+        </script>
 
         <?php
         // Request first, then its response directly beneath it. The response used to render at the
@@ -1329,8 +1369,8 @@ if (
     <!-- Referral loop — works a referral's own Task (openemr #14710); shares this Explorer's session token -->
     <?php include __DIR__ . '/referral_loop_card.php'; ?>
 
-    <!-- Patient app writes — QuestionnaireResponse held for staff review (openemr #15162); shares this Explorer's session token -->
-    <?php include __DIR__ . '/patient_app_write_card.php'; ?>
+    <!-- Patient app writes — held-for-review QuestionnaireResponse lifecycle with a patient token -->
+    <?php include __DIR__ . '/patient_write_card.php'; ?>
 
     <!-- FHIR write stress — concurrent load; shares this Explorer's session token -->
     <?php include __DIR__ . '/fhir_stress_card.php'; ?>

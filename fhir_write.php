@@ -23,6 +23,10 @@
  *                    checks find their Task by focus, owner and status)
  *   referrals        the referral ServiceRequests (category 3457005) with the Tasks that name
  *                    each as focus, marking the referral's own Task (the Referral loop panel)
+ *   referralLocks    ?task=..  try to change each element locked on a referral's own Task, with a
+ *                    stale If-Match so nothing is written: 400 = locked, 412 = not locked
+ *   clientReach      what the token can read, to recognize a client limited to an address book
+ *                    entry (Task and its referrals only; everything else 403)
  *   output           ?task=..  follow a Task's outputs: each DocumentReference, and the text
  *                    its attachment's Binary holds
  *   verify           ?resource=..&id=..  read the resource back (by id, or by _id search
@@ -45,7 +49,6 @@ header('Content-Type: application/json');
 
 require_once 'config.php';
 require_once __DIR__ . '/src/ScopeAlgebra.php';
-require_once __DIR__ . '/fhir_http.php';
 
 use OpenEMR\ApiExplorer\ScopeLab\ScopeAlgebra;
 
@@ -67,6 +70,46 @@ if ($access === '') {
 
 $fhirBase = rtrim((string) $GLOBALS['ApiConfig']['FHIR_SERVER_URL'], '/');
 $action = (string) ($_GET['action'] ?? 'catalog');
+
+/**
+ * @param array<int, string> $headers
+ * @return array{code:int, body:string, location:string, etag:string}
+ */
+function fhirCall(string $method, string $url, string $access, array $headers = [], ?string $payload = null): array
+{
+    $ch = curl_init($url);
+    $location = '';
+    $etag = '';
+    $opts = [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CUSTOMREQUEST => $method,
+        CURLOPT_HTTPHEADER => array_merge(["Authorization: Bearer {$access}"], $headers),
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HEADERFUNCTION => function ($ch, $header) use (&$location, &$etag) {
+            if (stripos($header, 'Location:') === 0) {
+                $location = trim(substr($header, strlen('Location:')));
+            } elseif (stripos($header, 'ETag:') === 0) {
+                $etag = trim(substr($header, strlen('ETag:')));
+            }
+            return strlen($header);
+        },
+    ];
+    if ($payload !== null) {
+        $opts[CURLOPT_POSTFIELDS] = $payload;
+    }
+    curl_setopt_array($ch, $opts);
+    $body = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($code === 0 && $curlError !== '') {
+        return ['code' => 0, 'body' => json_encode(['transport_error' => $curlError]) ?: '', 'location' => '', 'etag' => ''];
+    }
+
+    return ['code' => $code, 'body' => is_string($body) ? $body : '', 'location' => $location, 'etag' => $etag];
+}
 
 /**
  * First entry id out of a search bundle, optionally the first entry matching $pick.
@@ -231,6 +274,22 @@ function resolveFacilityOrganization(string $fhirBase, string $access): array
 
 /** SNOMED CT 3457005 Patient referral: the category OpenEMR gives a referral ServiceRequest. */
 const REFERRAL_CATEGORY = '3457005';
+
+/**
+ * ReferralTaskService::SET_ASIDE_STATUSES and OWN_REASONS: a referral Task in one of these
+ * statuses with one of these exact reasons was set aside by OpenEMR, not by its recipient, and
+ * no longer stands for the referral. Keep them in step with core.
+ */
+const REFERRAL_SET_ASIDE_STATUSES = ['cancelled', 'entered-in-error'];
+const REFERRAL_OWN_REASONS = [
+    'The referral was sent to another recipient.',
+    'The referral no longer names a recipient.',
+    'The referral was deleted.',
+    'The referral\'s reply was cleared.',
+];
+
+/** The Task elements OpenEMR locks on a referral's own Task (ReferralTaskService::lockedChanges()). */
+const REFERRAL_LOCKED_ELEMENTS = ['owner', 'code', 'focus', 'partOf'];
 
 /**
  * True when a ServiceRequest is a referral from the Transactions referral form.
@@ -684,6 +743,7 @@ try {
                 $taskSearch = fhirCall('GET', "{$fhirBase}/Task?focus=" . rawurlencode("ServiceRequest/{$id}"), $access, $accept);
                 $tasks = [];
                 $ownTask = null;
+                $ownTaskOrder = '';
                 foreach ($taskSearch['code'] === 200 ? bundleResources($taskSearch['body']) : [] as $task) {
                     $codes = array_map(
                         static fn($c) => is_array($c) ? ($c['code'] ?? null) : null,
@@ -693,22 +753,38 @@ try {
                     $own = in_array('fulfill', $codes, true) && empty($task['partOf'])
                         && $owner !== null && $performerRef !== null
                         && strcasecmp(preg_replace('~^.*/(\w+/[^/]+)$~', '$1', $owner) ?? $owner, preg_replace('~^.*/(\w+/[^/]+)$~', '$1', $performerRef) ?? $performerRef) === 0;
+                    $statusReason = $task['statusReason']['text'] ?? null;
+                    // A Task OpenEMR set aside itself (cancelled because the referral went
+                    // elsewhere, lost its recipient or was deleted; entered-in-error because its
+                    // reply was cleared) no longer counts as the recipient's. One the recipient
+                    // rejected, failed or cancelled still does, until a Re-send makes a newer one.
+                    $setAside = in_array($task['status'] ?? null, REFERRAL_SET_ASIDE_STATUSES, true)
+                        && in_array($statusReason, REFERRAL_OWN_REASONS, true);
                     $row = [
                         'id' => $task['id'] ?? null,
                         'status' => $task['status'] ?? null,
                         'version' => $task['meta']['versionId'] ?? null,
+                        'authoredOn' => $task['authoredOn'] ?? null,
                         'owner' => referenceLabel($task['owner'] ?? null),
                         'partOf' => !empty($task['partOf']),
                         'code' => implode(',', array_filter($codes, 'is_string')),
                         'businessStatus' => $task['businessStatus']['text'] ?? null,
-                        'statusReason' => $task['statusReason']['text'] ?? null,
+                        'statusReason' => $statusReason,
                         'outputs' => is_array($task['output'] ?? null) ? count($task['output']) : 0,
                         'own' => $own,
+                        'setAside' => $own && $setAside,
                     ];
                     $tasks[] = $row;
-                    // The newest own Task stands for the referral, as ReferralStatus reads it.
-                    if ($own && ($ownTask === null || !in_array($row['status'], ['cancelled', 'entered-in-error'], true))) {
-                        $ownTask = $row['id'];
+                    // The referral's status is the latest own Task that still counts
+                    // (ReferralTaskService::recipientTask() takes the highest row id). FHIR has no
+                    // row id, so authoredOn orders them, then lastModified; bundle order means
+                    // nothing, and after a Re-send the old rejected Task is still in the bundle.
+                    if ($own && !$setAside) {
+                        $order = (string) ($task['authoredOn'] ?? '') . '|' . (string) ($task['lastModified'] ?? $task['meta']['lastUpdated'] ?? '');
+                        if ($ownTask === null || strcmp($order, $ownTaskOrder) > 0) {
+                            $ownTask = $row['id'];
+                            $ownTaskOrder = $order;
+                        }
                     }
                 }
 
@@ -731,6 +807,134 @@ try {
                 'code' => 200,
                 'referrals' => $referrals,
             ]);
+            break;
+
+        case 'referralLocks':
+            // Try each element OpenEMR locks on a referral's own Task (openemr #15139). Every PUT
+            // carries an If-Match one version ahead of the Task. FhirTaskService validates the body
+            // before it compares versions, so a server with the lock answers 400 naming the
+            // element, and one without it answers 412: the probe never writes either way.
+            $taskId = (string) ($_GET['task'] ?? '');
+            if ($taskId === '') {
+                http_response_code(400);
+                echo json_encode(['error' => 'task is required']);
+                exit;
+            }
+            $accept = ['Accept: application/fhir+json'];
+            $read = fhirCall('GET', "{$fhirBase}/Task/" . rawurlencode($taskId), $access, $accept);
+            $task = json_decode($read['body'], true);
+            if ($read['code'] !== 200 || !is_array($task)) {
+                echo json_encode(['code' => $read['code'], 'step' => 'read', 'body' => $task ?? $read['body']]);
+                break;
+            }
+            $version = (int) ($task['meta']['versionId'] ?? 0);
+            $patientRef = is_string($task['for']['reference'] ?? null) ? $task['for']['reference'] : null;
+            $focusRef = is_string($task['focus']['reference'] ?? null) ? $task['focus']['reference'] : null;
+
+            // Replacement values must be valid in every other way. FhirTaskService merges errors
+            // with +=, so a reference it can't resolve would claim the element's key first and the
+            // lock's message would never show.
+            $otherServiceRequest = null;
+            $otherTask = null;
+            if ($patientRef !== null) {
+                $patientQuery = 'patient=' . rawurlencode($patientRef) . '&_count=50';
+                foreach (bundleResources(fhirCall('GET', "{$fhirBase}/ServiceRequest?{$patientQuery}", $access, $accept)['body']) as $sr) {
+                    if (is_string($sr['id'] ?? null) && 'ServiceRequest/' . $sr['id'] !== $focusRef) {
+                        $otherServiceRequest = 'ServiceRequest/' . $sr['id'];
+                        break;
+                    }
+                }
+                foreach (bundleResources(fhirCall('GET', "{$fhirBase}/Task?{$patientQuery}", $access, $accept)['body']) as $other) {
+                    if (is_string($other['id'] ?? null) && $other['id'] !== $taskId) {
+                        $otherTask = 'Task/' . $other['id'];
+                        break;
+                    }
+                }
+            }
+            $requester = is_array($task['requester'] ?? null) ? $task['requester'] : null;
+            $changes = [
+                'owner' => $requester !== null && ($requester['reference'] ?? null) !== ($task['owner']['reference'] ?? null)
+                    ? ['owner' => ['reference' => $requester['reference']]]
+                    : null,
+                'code' => ['code' => ['coding' => [['system' => 'http://hl7.org/fhir/CodeSystem/task-code', 'code' => 'approve', 'display' => 'Activate/approve the focal resource']]]],
+                'focus' => $otherServiceRequest !== null ? ['focus' => ['reference' => $otherServiceRequest]] : null,
+                'partOf' => $otherTask !== null ? ['partOf' => [['reference' => $otherTask]]] : null,
+            ];
+            $skipReason = [
+                'owner' => 'the Task has no requester to hand it to',
+                'focus' => "the patient has no other ServiceRequest to point it at",
+                'partOf' => "the patient has no other Task to make its parent",
+            ];
+
+            $probes = [];
+            foreach (REFERRAL_LOCKED_ELEMENTS as $element) {
+                if ($changes[$element] === null) {
+                    $probes[] = ['element' => $element, 'outcome' => 'skipped', 'detail' => $skipReason[$element]];
+                    continue;
+                }
+                $body = array_replace($task, $changes[$element]);
+                $ifMatch = 'W/"' . ($version + 1) . '"';
+                $r = fhirCall('PUT', "{$fhirBase}/Task/" . rawurlencode($taskId), $access, [
+                    'Accept: application/fhir+json',
+                    'Content-Type: application/fhir+json',
+                    'If-Match: ' . $ifMatch,
+                ], (string) json_encode($body, JSON_UNESCAPED_SLASHES));
+                $text = $r['body'];
+                $locked = $r['code'] === 400
+                    && (stripos($text, "can't change on a referral") !== false || stripos($text, "can't be set on a referral") !== false);
+                $probes[] = [
+                    'element' => $element,
+                    'sent' => $changes[$element],
+                    'ifMatch' => $ifMatch,
+                    'code' => $r['code'],
+                    'outcome' => $locked ? 'locked' : ($r['code'] === 412 ? 'not-locked' : 'inconclusive'),
+                    'detail' => $locked
+                        ? 'refused, as it should be'
+                        : ($r['code'] === 412
+                            ? 'the body was accepted and only the stale If-Match stopped it: this server does not lock ' . $element
+                            : 'answered for another reason'),
+                    'body' => json_decode($text, true) ?? $text,
+                ];
+            }
+
+            $after = fhirCall('GET', "{$fhirBase}/Task/" . rawurlencode($taskId), $access, $accept);
+            $afterBody = json_decode($after['body'], true);
+            echo json_encode([
+                'code' => 200,
+                'task' => ['id' => $taskId, 'status' => $task['status'] ?? null, 'version' => $version],
+                'probes' => $probes,
+                'unchanged' => is_array($afterBody) && (int) ($afterBody['meta']['versionId'] ?? -1) === $version,
+            ]);
+            break;
+
+        case 'clientReach':
+            // What this token reaches, to tell a client limited to an address book entry
+            // (openemr #15140) from an ordinary one: a limited client reads only the Tasks its
+            // entry owns and the referrals it currently receives, and every other route is 403.
+            $accept = ['Accept: application/fhir+json'];
+            $probes = [
+                'Task' => "{$fhirBase}/Task?_count=50",
+                'Referral ServiceRequests' => "{$fhirBase}/ServiceRequest?category=" . rawurlencode('http://snomed.info/sct|' . REFERRAL_CATEGORY) . '&_count=50',
+                'All ServiceRequests' => "{$fhirBase}/ServiceRequest?_count=50",
+                'Patient' => "{$fhirBase}/Patient?_count=1",
+                'Practitioner' => "{$fhirBase}/Practitioner?_count=1",
+                'Organization' => "{$fhirBase}/Organization?_count=1",
+            ];
+            $rows = [];
+            foreach ($probes as $label => $url) {
+                $r = fhirCall('GET', $url, $access, $accept);
+                $decoded = json_decode($r['body'], true);
+                $rows[] = [
+                    'label' => $label,
+                    'url' => $url,
+                    'code' => $r['code'],
+                    'entries' => is_array($decoded) && is_array($decoded['entry'] ?? null) ? count($decoded['entry']) : null,
+                ];
+            }
+            $byLabel = array_column($rows, null, 'label');
+            $limited = $byLabel['Task']['code'] === 200 && $byLabel['Patient']['code'] === 403
+                && $byLabel['Practitioner']['code'] === 403 && $byLabel['Organization']['code'] === 403;
+            echo json_encode(['code' => 200, 'rows' => $rows, 'looksLimited' => $limited]);
             break;
 
         case 'output':
